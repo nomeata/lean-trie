@@ -7,6 +7,18 @@ variable {α : Type u}
 variable [DecidableEq α]
 variable {β : Type v}
 
+
+def fun_upd : (d : β) → (α → Option β) → α → (β → β) → (α → Option β) :=
+  fun d f x k x' => if x' = x then some (k ((f x').getD d)) else f x'
+
+theorem fun_upd_eq (d : β) (f : α → Option β) (x : α) (k : β → β) :
+  (fun_upd d f x k x) = some (k ((f x).getD d)) := by
+  simp [fun_upd]
+
+theorem fun_upd_ne (d : β) (f : α → Option β) (x₁ x₂ : α) (k : β → β) (h : x₂ ≠ x₁):
+  (fun_upd d f x₁ k x₂) = f x₂ := by
+  simp [fun_upd, h]
+
 namespace Trie.Abstract
 
 /--
@@ -29,15 +41,10 @@ def c : Trie α β → α → Option (Trie α β)
 
 def empty : Trie α β := .node none (fun _ => .none)
 
-def child : Trie α β → α → Trie α β
-  | .node _ c, k => (c k).getD empty
-
 def insert (t : Trie α β) : List α → β → Trie α β
   | [], v => .node (some v) t.c
-  | k::ks, v => .node t.val fun k' =>
-    if k' = k
-    then (t.child k).insert ks v
-    else t.c k'
+  | k::ks, v => .node t.val <|
+      fun_upd empty t.c k fun t => t.insert ks v
 
 def find? (t : Trie α β) : List α → Option β
   | [] => t.val
@@ -54,7 +61,8 @@ theorem find?_insert_eq (t : Trie α β) (k : List α) (v : β) :
   induction k generalizing t with
   | nil => simp [insert, find?, val]
   | cons k ks ih =>
-    cases t with | _ v' c => simpa [insert, find?, child] using ih _
+    cases t with | _ v' c =>
+    simpa [insert, find?, fun_upd] using ih _
 
 theorem find?_insert_neq (t : Trie α β) (k k' : List α) (hne : k ≠ k') (v : β) :
     (t.insert k v).find? k' = t.find? k' := by
@@ -62,20 +70,20 @@ theorem find?_insert_neq (t : Trie α β) (k k' : List α) (hne : k ≠ k') (v :
   | nil =>
     cases k' with | nil => contradiction | cons k' ks' =>
     cases t with | _ v' c =>
-    simp [find?, insert, child]
+    simp [find?, insert]
   | cons k ks ih =>
     cases t with | _ v' c =>
     cases k' with
-    | nil => simp [find?, insert, child]
+    | nil => simp [find?, insert]
     | cons k' ks' =>
       if hk : k' = k then
         subst k'
         have : ks ≠ ks' := by intro h; apply hne; cases h; rfl
-        simp [insert, find?, child, hne, Option.getD]
-        simp [ih, this]
+        simp [insert, find?, hne, fun_upd, Option.getD, ih, this]
         cases c k <;> simp
       else
-        simp [insert, find?, child, hk]
+        simp [insert, find?, fun_upd, hk]
+
 
 end Trie
 
@@ -91,7 +99,15 @@ theorem Array.drop_data_nil {α : Type _} (as : Array α) (i : Nat) (h : ¬ i < 
 theorem Array.extract_data {α} (as : Array α) (i : Nat) (j : Nat) :
   (as.extract i j).data = (as.data.take j).drop i := by sorry
 
-theorem Array.attach {α} (as : Array α) : Array {x : α // x ∈ as} := by sorry
+theorem Array.modify_data {α} (as : Array α) (i : Nat) (f : α → α) (h : i < as.size):
+    (Array.modify as i f).data = as.data.take i ++ [f as[i]] ++ as.data.drop (i + 1) := by sorry
+
+theorem Array.data_getElem {α} (as : Array α) (i : Nat) (h : i < as.size) :
+  as.data[i] = as[i] := rfl
+
+-- TODO: Lemma has wrong name in std
+axiom Array.getElem_mem :
+  ∀ {α : Type u} {i : Nat} (a : Array α) (h : i < Array.size a), a[i] ∈ a
 
 namespace Trie.AbstractArray
 
@@ -108,10 +124,7 @@ def insert (t : Trie α β) (ks : Array α) (v : β) : Trie α β := go t 0
   where
   go t i := if h : i < ks.size then
     let k := ks[i]
-    .node t.val fun k' =>
-      if k' = k
-      then go (t.child k) (i + 1)
-      else t.c k'
+    .node t.val (fun_upd empty t.c k fun t => go t (i + 1))
   else
     .node (some v) t.c
   termination_by ks.size - i
@@ -131,16 +144,15 @@ def find? (t : Trie α β) (ks : Array α) : Option β := go t 0
 derive_induction find?.go
 
 /-
-We first specify the operations via their abstract counter-parts on lists.
+We first specify the operations on Arrays via their abstract counter-parts on lists.
 -/
 
 theorem insert_go_data (t : Trie α β) (ks : Array α) (v : β) (i : Nat) :
     insert.go ks v t i = Abstract.Trie.insert t (ks.data.drop i) v := by
   induction t, i using insert.go.induct (ks := ks) (v := v)
-  case case1 t i hi k =>
-    intro IH
+  case case1 t i hi IH =>
     unfold insert.go; simp only [hi, ↓reduceDite]
-    simp only [Abstract.Trie.insert, Array.drop_data_cons, hi, IH]
+    simp [Abstract.Trie.insert, Array.drop_data_cons, empty, hi, IH]
   case case2 t i hi =>
     unfold insert.go; simp only [hi, ↓reduceDite]
     simp only [Abstract.Trie.insert, Array.drop_data_nil (h := hi)]
@@ -209,6 +221,32 @@ def find? (ks : List α) (vs : List β) (k : α) : Option β :=
 theorem find?_nil (vs : List β) (k : α) : find? [] vs k = none := by
   simp [find?]
 
+theorem find?_upsert_eq (ks : List α) (vs : List β) (k : α) (f : Option β → β) :
+    find? (upsert ks vs k f).1 (upsert ks vs k f).2 k = some (f (find? ks vs k)) := by
+  induction ks generalizing vs with
+  | nil => simp [upsert, find?]
+  | cons k' ks ih =>
+    cases vs with
+    | nil => simp [upsert, find?]
+    | cons v vs =>
+      simp [upsert]
+      split <;> simp [find?]
+      next heq => subst k'; simp
+      next hne => simp [hne]; apply ih
+
+theorem find?_upsert_ne (ks : List α) (vs : List β) (k₁ k₂ : α) (f : Option β → β) (h : k₂ ≠ k₁) :
+    find? (upsert ks vs k₁ f).1 (upsert ks vs k₁ f).2 k₂ = find? ks vs k₂ := by
+  induction ks generalizing vs with
+  | nil => simp [upsert, find?, h]
+  | cons k' ks ih =>
+    cases vs with
+    | nil => simp [upsert, find?, h]
+    | cons v vs =>
+      simp [upsert]
+      split <;> simp [find?]
+      next heq => subst k'; simp [h]
+      next hne => split <;> simp [*]
+
 end AssocList
 
 namespace AssocArray
@@ -247,23 +285,22 @@ def upsert_go_spec (ks : Array α) (vs : Array β) (k : α) (f : Option β → �
   induction i using upsert.go.induct (ks := ks) (vs := vs) (k := k) (f := f)
   case case1 i hi hj heq =>
     unfold upsert.go; simp only [hi, hj, heq, ↓reduceIte, ↓reduceDite]
-    simp [Array.data_ext, AssocList.upsert, Array.drop_data_cons, hi, hj, heq, ↓reduceIte, ↓reduceDite]
-    sorry
-    -- Stuff about modify
+    simp [Array.data_ext, AssocList.upsert, Array.drop_data_cons, hi, hj, ↓reduceIte,
+      ↓reduceDite, Array.modify_data, hj]
+    simp [← Array.data_getElem, List.get_drop_eq_drop ]
   case case2 i hi hj hneq IH =>
     unfold upsert.go; simp only [hi, hj, hneq, ↓reduceIte, ↓reduceDite]
     simp only [Array.data_ext, AssocList.upsert, Array.drop_data_cons, hi, hj, hneq,
       ↓reduceIte, ↓reduceDite]
     rw [IH]
-    simp [Array.data_ext, ← List.take_concat_get, hi, hj]
-    sorry -- Needs Array.getElem data
+    simp [Array.data_ext, ← List.take_concat_get, hi, hj, Array.data_getElem]
   case case3 i hi hj =>
-    have : vs.data.length ≤ i := by sorry -- Needs Array.data_length
+    have : vs.data.length ≤ i := by unfold Array.size at hj; omega
     unfold upsert.go; simp only [hi, hj, ↓reduceIte, ↓reduceDite]
     simp [Array.data_ext, AssocList.upsert, Array.drop_data_cons, hi, hj, ↓reduceIte, ↓reduceDite,
       List.take_length_le, List.drop_length_le, this]
   case case4 i hi =>
-    have : ks.data.length ≤ i := by sorry -- Needs Array.data_length
+    have : ks.data.length ≤ i := by unfold Array.size at hi; omega
     unfold upsert.go; simp only [hi, ↓reduceIte, ↓reduceDite]
     simp [Array.data_ext, AssocList.upsert, Array.drop_data_cons, hi, ↓reduceIte, ↓reduceDite,
       List.take_length_le, List.drop_length_le, this]
@@ -274,13 +311,13 @@ def upsert_spec (ks : Array α) (vs : Array β) (k : α) (f : Option β → β) 
       let (ks', vs') := AssocList.upsert ks.data vs.data k f;
       (ks'.toArray, vs'.toArray) := by simp [upsert, upsert_go_spec]
 
-def find? (ks : Array α) (vs : Array β) (k : α) : Option β := go 0
+def find?' (ks : Array α) (vs : Array β) (k : α) : Option {x : β // x ∈ vs} := go 0
   where
   go i :=
     if hi : i < ks.size then
       if hj : i < vs.size then
         if k = ks[i] then
-          some vs[i]
+          some ⟨vs[i], Array.getElem_mem _ hj⟩
         else
           go (i + 1)
       else
@@ -289,36 +326,52 @@ def find? (ks : Array α) (vs : Array β) (k : α) : Option β := go 0
       none
   termination_by ks.size - i
 
-derive_induction find?.go
+derive_induction find?'.go
 
-def find?_go_spec (ks : Array α) (vs : Array β) (k : α) (i : Nat) :
-    find?.go ks vs k i = AssocList.find? (ks.data.drop i) (vs.data.drop i) k := by
-  induction i using find?.go.induct (ks := ks) (vs := vs) (k := k)
+def find? (ks : Array α) (vs : Array β) (k : α) : Option β := (find?' ks vs k).map (·.val)
+
+def find?'_go_spec (ks : Array α) (vs : Array β) (k : α) (i : Nat) :
+    (find?'.go ks vs k i).map (·.val) = AssocList.find? (ks.data.drop i) (vs.data.drop i) k := by
+  induction i using find?'.go.induct (ks := ks) (vs := vs) (k := k)
   case case1 i hi hj heq =>
-    unfold find?.go; simp only [hi, hj, heq, ↓reduceIte, ↓reduceDite]
+    unfold find?'.go; simp only [hi, hj, heq, ↓reduceIte, ↓reduceDite]
     simp [Array.data_ext, AssocList.find?, Array.drop_data_cons, hi, hj, heq, ↓reduceIte, ↓reduceDite]
   case case2 i hi hj hneq IH =>
-    unfold find?.go; simp only [hi, hj, hneq, ↓reduceIte, ↓reduceDite]
+    unfold find?'.go; simp only [hi, hj, hneq, ↓reduceIte, ↓reduceDite]
     simp only [Array.data_ext, AssocList.find?, Array.drop_data_cons, hi, hj, hneq,
       ↓reduceIte, ↓reduceDite, IH]
   case case3 i hi hj =>
-    have : vs.data.length ≤ i := by sorry -- Needs Array.data_length
-    unfold find?.go; simp only [hi, hj, ↓reduceIte, ↓reduceDite]
+    have : vs.data.length ≤ i := by unfold Array.size at hj; omega
+    unfold find?'.go; simp only [hi, hj, ↓reduceIte, ↓reduceDite]
     simp only [Array.data_ext, AssocList.find?, Array.drop_data_cons, hi, hj, ↓reduceIte, ↓reduceDite,
-      List.drop_length_le, this]
+      List.drop_length_le, this, Option.map_none']
   case case4 i hi =>
-    have : ks.data.length ≤ i := by sorry -- Needs Array.data_length
-    unfold find?.go; simp only [hi, ↓reduceIte, ↓reduceDite]
+    have : ks.data.length ≤ i := by unfold Array.size at hi; omega
+    unfold find?'.go; simp only [hi, ↓reduceIte, ↓reduceDite]
     simp only [Array.data_ext, AssocList.find?, Array.drop_data_cons, hi, ↓reduceIte, ↓reduceDite,
-      List.drop_length_le, this]
+      List.drop_length_le, this, Option.map_none']
+
+def find?'_spec (ks : Array α) (vs : Array β) (k : α) :
+    (find?' ks vs k).map (·.val) = AssocList.find? ks.data vs.data k :=
+  by simp [find?', find?'_go_spec]
 
 def find?_spec (ks : Array α) (vs : Array β) (k : α) :
-    find? ks vs k = AssocList.find? ks.data vs.data k :=
-  by simp [find?, find?_go_spec]
+    find? ks vs k = AssocList.find? ks.data vs.data k := find?'_spec _ _ _
 
 @[simp]
 theorem find?_nil (vs : Array β) (k : α) : find? #[] vs k = none := by
   simp [find?_spec]
+
+theorem find?_upsert_eq (ks : Array α) (vs : Array β) (k : α) (f : Option β → β) :
+    find? (upsert ks vs k f).1 (upsert ks vs k f).2 k = some (f (find? ks vs k)) := by
+  simp [upsert_spec, find?_spec]
+  apply AssocList.find?_upsert_eq
+
+theorem find?_upsert_ne (ks : Array α) (vs : Array β) (k₁ k₂ : α) (f : Option β → β)  (h : k₂ ≠ k₁) :
+    find? (upsert ks vs k₁ f).1 (upsert ks vs k₁ f).2 k₂ = find? ks vs k₂:= by
+  simp [upsert_spec, find?_spec]
+  apply AssocList.find?_upsert_ne (h := h)
+
 
 end AssocArray
 
@@ -344,27 +397,39 @@ def insert (t : Trie α β) (ks : Array α) (v : β) : Trie α β := go t 0 wher
         .node (some v) ks' vs
   termination_by _ i => ks.size - i
 
-noncomputable -- due to Array.attach, which we use for similarity with toAbstractArray
 def find? (t : Trie α β) (ks : Array α) : Option β := go t 0 where
   go | .node val ks' vs, i =>
       if h : i < ks.size then
-        match AssocArray.find? ks' vs.attach ks[i] with
+        match AssocArray.find? ks' vs ks[i] with
         | none => none
-        | some ⟨t, _⟩  => go t (i + 1)
+        | some t => go t (i + 1)
       else
         val
   termination_by _ i => ks.size - i
 
 derive_induction find?.go
 
-noncomputable -- due to Array.attach
 def toAbstractArray : Trie α β → AbstractArray.Trie α β
   | .node val ks vs => .node val fun k =>
-    match AssocArray.find? ks vs.attach k with
+    match AssocArray.find?' ks vs k with
     | none => none
     | some ⟨t, _⟩ => some t.toAbstractArray
 termination_by t => sizeOf t
 
+def toAbstractArray_eq (val : Option β) (ks : Array α) (vs : Array (Trie α β)) :
+  toAbstractArray (Trie.node val ks vs) = .node val fun k =>
+    match AssocArray.find? ks vs k with
+    | none => none
+    | some t => some t.toAbstractArray := by
+  conv => left; unfold toAbstractArray
+  congr 1
+  funext k
+  unfold AssocArray.find?
+  simp [Option.map]
+  split <;> simp [*]
+
+
+@[simp]
 theorem empty_spec :
     (empty : Trie α β).toAbstractArray = AbstractArray.Trie.empty := by
   simp [toAbstractArray, empty, AbstractArray.Trie.empty]
@@ -377,19 +442,56 @@ theorem find?_go_spec (t : Trie α β) (ks : Array α) (i : Nat) :
     unfold find?.go
     unfold AbstractArray.Trie.find?.go
     simp only [hi, ↓reduceDite]
-    simp only [toAbstractArray, Abstract.Trie.child, Option.getD, Abstract.Trie.c, IH]
+    simp only [toAbstractArray_eq, Option.getD, Abstract.Trie.c, IH]
     split <;> simp
   case case2 v ks' vs i hi =>
     unfold find?.go
     unfold AbstractArray.Trie.find?.go
     simp only [hi, ↓reduceDite]
-    simp only [toAbstractArray, Abstract.Trie.val]
+    simp only [toAbstractArray_eq, Abstract.Trie.val]
     done
 
 theorem find?_spec (t : Trie α β) (ks : Array α):
     t.find? ks = t.toAbstractArray.find? ks := by
   simp [find?, AbstractArray.Trie.find?, find?_go_spec]
 
+theorem insert_go_spec (t : Trie α β) (ks : Array α) (i : Nat) (v : β):
+    (insert.go ks v t i).toAbstractArray  = AbstractArray.Trie.insert.go ks v t.toAbstractArray i := by
+  induction t, i using find?.go.induct (ks := ks)
+  case case1 v ks' vs i hi IH =>
+    unfold insert.go AbstractArray.Trie.insert.go
+    simp only [hi, ↓reduceDite]
+    simp only [toAbstractArray_eq]
+    congr 1
+    funext k
+    if h : k = ks[i] then
+      simp only [↓reduceIte, h, Abstract.Trie.c, AssocArray.find?_upsert_eq, IH, fun_upd_eq]
+      simp [Option.getD]
+      split <;> simp [*]
+    else
+      simp only [↓reduceIte, h, Abstract.Trie.c, AssocArray.find?_upsert_ne (h := h), fun_upd_ne (h := h)]
+  case case2 v ks' vs i hi =>
+    unfold insert.go
+    unfold AbstractArray.Trie.insert.go
+    simp only [hi, ↓reduceDite]
+    simp only [toAbstractArray, Abstract.Trie.c]
+
+theorem insert_spec (t : Trie α β) (ks : Array α) (v : β):
+    (insert t ks v).toAbstractArray  = AbstractArray.Trie.insert t.toAbstractArray ks v :=
+  insert_go_spec ..
+
+
+theorem find?_empty (k : Array α) : find? (empty : Trie α β) k = none := by
+  simp [find?_spec, AbstractArray.Trie.find?_empty]
+
+theorem find?_insert_eq (t : Trie α β) (k : Array α) (v : β) :
+    (t.insert k v).find? k = some v := by
+  simp [insert_spec, find?_spec]
+  apply AbstractArray.Trie.find?_insert_eq
+
+theorem find?_insert_neq (t : Trie α β) (k k' : Array α) (hne : k ≠ k') (v : β) :
+    (t.insert k v).find? k' = t.find? k' := by
+  simpa [insert_spec, find?_spec] using AbstractArray.Trie.find?_insert_neq _ _ _ hne _
 
 end Trie
 
