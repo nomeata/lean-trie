@@ -461,15 +461,15 @@ theorem insert_go_spec (t : Trie α β) (ks : Array α) (i : Nat) (v : β):
   case case1 v ks' vs i hi IH =>
     unfold insert.go AbstractArray.Trie.insert.go
     simp only [hi, ↓reduceDite]
-    simp only [toAbstractArray_eq]
+    simp only [toAbstractArray_eq, Abstract.Trie.c]
     congr 1
     funext k
     if h : k = ks[i] then
-      simp only [↓reduceIte, h, Abstract.Trie.c, AssocArray.find?_upsert_eq, IH, fun_upd_eq]
+      simp only [↓reduceIte, h, AssocArray.find?_upsert_eq, IH, fun_upd_eq]
       simp [Option.getD]
       split <;> simp [*]
     else
-      simp only [↓reduceIte, h, Abstract.Trie.c, AssocArray.find?_upsert_ne (h := h), fun_upd_ne (h := h)]
+      simp only [↓reduceIte, h, AssocArray.find?_upsert_ne (h := h), fun_upd_ne (h := h)]
   case case2 v ks' vs i hi =>
     unfold insert.go
     unfold AbstractArray.Trie.insert.go
