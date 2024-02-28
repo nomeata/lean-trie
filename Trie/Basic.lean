@@ -109,6 +109,23 @@ theorem Array.size_extract {α} (as : Array α) (start stop : Nat) :
     Array.size (Array.extract as start stop) = min stop (Array.size as) - start :=
   by sorry
 
+theorem Array.get_extract {α} {i : Nat} {as : Array α} {start stop : Nat} (h : i < Array.size (Array.extract as start stop)) :
+ (Array.extract as start stop)[i] = as[start + i]'(by simp [Array.size_extract] at *; omega) := sorry
+
+theorem Array.attach {α} (as : Array α) : Array {x : α // x ∈ as} := by sorry
+
+
+@[simp]
+theorem Array.attach_singleton {α} (a : α) : #[a].attach = #[⟨a, .mk (by simp)⟩] := sorry
+
+@[simp]
+theorem Array.map_attach {α β} (xs : Array α) (f : α → β) :
+  xs.attach.map (fun ⟨x, _⟩ => f x) = xs.map f := sorry
+
+@[simp]
+theorem Array.map_two {α β} (x₁ x₂ : α) (f : α → β) :
+  #[x₁, x₂].map f = #[f x₁, f x₂] := sorry
+
 -- TODO: Lemma has wrong name in std
 axiom Array.getElem_mem :
   ∀ {α : Type u} {i : Nat} (a : Array α) (h : i < Array.size a), a[i] ∈ a
@@ -272,6 +289,15 @@ def upsert (ks : Array α) (vs : Array β) (k : α) (f : Option β → β) : Arr
   termination_by ks.size - i
 
 derive_induction upsert.go
+
+@[simp]
+theorem upsert_nil (k : α) (f : Option β → β) : upsert #[] #[] k f = (#[k], #[f none]) := rfl
+
+theorem upsert_singleton_ne (k₁ k₂ : α) (v₁ : β) (f : Option β → β) (hne : k₂ ≠ k₁):
+  upsert #[k₁] #[v₁] k₂ f = (#[k₁, k₂], #[v₁, f none]) := by
+  unfold upsert upsert.go
+  simp [hne, Array.getElem_eq_data_get, List.get]
+  rfl
 
 def biDataDrop {α} {β} (pair : Array α × Array β) (i : Nat) : List α × List β :=
   (pair.1.data.drop i, pair.2.data.drop i)
@@ -544,6 +570,27 @@ def hasPrefix (xs : Array α) (ys : Array α) (offset1 : Nat) : Bool :=
       true
     termination_by ys.size - i
   loop 0
+derive_induction hasPrefix.loop
+
+
+theorem commonPrefix_loop_of_hasPrefix_loop (xs : Array α) (ys : Array α) (offset1 i : Nat)
+    (hi : i ≤ ys.size) (h : hasPrefix.loop xs ys offset1 i = true) :
+    commonPrefix.loop xs ys offset1 i = ys.size := by
+  induction i using hasPrefix.loop.induct (xs := xs) (ys := ys) (offset1 := offset1)
+  case case1 IH =>
+    unfold hasPrefix.loop at h; simp [*] at h
+    unfold commonPrefix.loop; simp [*]
+    apply IH _ h
+    omega
+  case case2 | case3 => unfold hasPrefix.loop at h; simp [*] at h
+  case case4 i hi =>
+    unfold commonPrefix.loop; simp [*]
+    omega
+
+theorem commonPrefix_of_hasPrefix (xs : Array α) (ys : Array α) (offset1 : Nat)
+    (h : hasPrefix xs ys offset1 = true) :
+    commonPrefix xs ys offset1 = ys.size :=
+  commonPrefix_loop_of_hasPrefix_loop xs ys offset1 0 (Nat.zero_le _) h
 
 def mkPath (ps : Array α) (t : Trie α β) : Trie α β :=
   if h : 0 < ps.size  then .path none ps h t else t
@@ -555,22 +602,22 @@ def insert (t : Trie α β) (ks : Array α) (v : β) : Trie α β := go 0 t wher
         path val (ks.extract i ks.size) (by simp [Array.size_extract]; omega) (.leaf (some v))
       else
         .leaf (some v)
-    | .path val ps hps t =>
+    | .path val ps hps t' =>
       if h : i < ks.size then
         let j := commonPrefix ks ps i
         if hj : 0 < j then
           -- split common prefix, continue
           .path val (ps.extract 0 j) (by simp [Array.size_extract];omega) <| go (i + j) <|
-              .mkPath (ps.extract j ps.size) t
+              .mkPath (ps.extract j ps.size) t'
         else
           -- no common prefix, split off first key
           let c := ks[i]
-          let c' := ps[j]'(by omega)
+          let c' := ps[0]'(by omega)
           let t := mkPath (ks.extract (i+1) ks.size) (.leaf (some v))
-          let t'' := mkPath (ps.extract 1 ps.size) t
-          .node val #[c, c'] #[t, t'']
+          let t'' := mkPath (ps.extract 1 ps.size) t'
+          .node val #[c', c] #[t'', t] -- order matters for refinemnet proof!
       else
-        .path (some v) ps hps t
+        .path (some v) ps hps t'
     | .node val ks' vs =>
       if h : i < ks.size then
         let (ks'', vs'') := AssocArray.upsert ks' vs ks[i] fun t? =>
@@ -582,13 +629,13 @@ def insert (t : Trie α β) (ks : Array α) (v : β) : Trie α β := go 0 t wher
   decreasing_by all_goals simp_wf; omega
 
 def find? (t : Trie α β) (ks : Array α) : Option β := go 0 t where
-  go (i : Nat)
-    | .leaf val =>
+  go
+    | i, .leaf val =>
       if i < ks.size then
         none
       else
         val
-    | path val ps _ t' =>
+    | i, path val ps _ t' =>
       if i < ks.size then
         if hasPrefix ks ps i then
           go (i + ps.size) t'
@@ -596,12 +643,105 @@ def find? (t : Trie α β) (ks : Array α) : Option β := go 0 t where
           none
       else
         val
-    | .node val ks' vs =>
+    | i, .node val ks' vs =>
       if h : i < ks.size then
         match AssocArray.find? ks' vs ks[i] with
         | none => none
         | some t => go (i + 1) t
       else
         val
-  termination_by ks.size - i
+  termination_by i => ks.size - i
   decreasing_by all_goals simp_wf; omega
+
+derive_induction find?.go
+
+def uncompressPath (val : Option β) (ps : Array α) (i : Nat) (t : Array.Trie α β) : Array.Trie α β :=
+  if h : i < ps.size then
+    .node val #[ps[i]] #[uncompressPath none ps (i + 1) t]
+  else
+    t
+termination_by ps.size - i
+derive_induction uncompressPath
+
+
+noncomputable
+def uncompress : Trie α β → Array.Trie α β
+  | .leaf val => .node val #[] #[]
+  | .node val ks vs => .node val ks (vs.attach.map fun ⟨t, _⟩ => t.uncompress)
+  | .path val ps _ t => uncompressPath val ps 0 (t.uncompress)
+termination_by t => sizeOf t
+
+@[simp]
+theorem empty_spec : (empty : Trie α β).uncompress = .empty := by rfl
+
+@[simp]
+theorem uncompressPath_extract (val : Option β) (ks : Array α) (i j : Nat) t :
+  uncompressPath val (Array.extract ks i (Array.size ks)) j t =
+  uncompressPath val ks (i + j) t := by
+  unfold uncompressPath;
+  simp [Array.size_extract, Array.get_extract]
+  split
+  next hj =>
+    have : i + j < Array.size ks := by omega
+    simp [this, uncompressPath_extract (ks := ks) (j := j+1)]
+    rfl
+  next hj =>
+    have : ¬ (i + j < Array.size ks) := by omega
+    simp [this]
+termination_by ks.size - j
+decreasing_by simp_wf; omega
+
+@[simp]
+theorem uncompress_mkPath (ps : Array α) (t : Trie α β):
+    uncompress (mkPath ps t) = uncompressPath none ps 0 t.uncompress := by
+  unfold mkPath
+  split
+  next hps => simp [uncompress]
+  next hps => unfold uncompressPath; simp [hps]
+
+
+theorem insert_go_spec (t : Trie α β) (ks : Array α) (i : Nat) (v : β):
+    (insert.go ks v i t).uncompress  = .insert.go ks v t.uncompress i := by
+  cases t with
+  | leaf val =>
+    simp [insert.go, *, uncompress]
+    split
+    next hi =>
+      simp [uncompress]
+      sorry -- insert into leaf is uncompressPath
+    next hi0 =>
+      simp [insert.go, *, uncompress, Array.Trie.insert.go]
+  | path val ps hps t' =>
+    simp [insert.go, *, uncompress]
+    split
+    next hi =>
+      split
+      next hcommonPrefix_pos =>
+        simp [uncompress]
+        rw [insert_go_spec]
+        simp
+        sorry -- insert into uncompressPath goes past common prefix
+      next hcommonPrefix_0 =>
+        have : commonPrefix ks ps i = 0 := by omega
+        have hne : ks[i] ≠ ps[0] := by sorry
+        simp [uncompress, this, Array.Trie.insert.go, hi]
+        conv => right; unfold uncompressPath
+        simp [hps, Array.Trie.insert.go, hi, AssocArray.upsert_singleton_ne (hne := hne)]
+        sorry -- insert into empty is uncompressPath
+    next hi0 =>
+      simp [insert.go, *, uncompress, Array.Trie.insert.go]
+      unfold uncompressPath
+      simp [hps, Array.Trie.insert.go, hi0]
+  | node val ks' cs =>
+    simp [insert.go]
+    split
+    next hi =>
+      simp [uncompress, Array.Trie.insert.go, hi]
+      constructor
+      -- Array.map commutes with AssocArray.upsert
+      · sorry
+      · sorry
+    next hi0 =>
+      simp [insert.go, *, uncompress, Array.Trie.insert.go]
+termination_by ks.size - i
+decreasing_by simp_wf; omega
