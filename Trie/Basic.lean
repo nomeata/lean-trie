@@ -123,6 +123,10 @@ theorem Array.map_attach {α β} (xs : Array α) (f : α → β) :
   xs.attach.map (fun ⟨x, _⟩ => f x) = xs.map f := sorry
 
 @[simp]
+theorem Array.map_toArray {α β} (xs : List α) (f : α → β) :
+  xs.toArray.map f = (xs.map f).toArray := sorry
+
+@[simp]
 theorem Array.map_two {α β} (x₁ x₂ : α) (f : α → β) :
   #[x₁, x₂].map f = #[f x₁, f x₂] := sorry
 
@@ -268,6 +272,40 @@ theorem find?_upsert_ne (ks : List α) (vs : List β) (k₁ k₂ : α) (f : Opti
       next heq => subst k'; simp [h]
       next hne => split <;> simp [*]
 
+theorem upsert_1_congr {β₁ β₂} (ks : List α) (vs₁ : List β₁) (vs₂ : List β₂) (k : α)
+  (f₁ : Option β₁ → β₁) (f₂ : Option β₂ → β₂) (h : vs₁.length = vs₂.length) :
+  (upsert ks vs₁ k f₁).1 = (upsert ks vs₂ k f₂).1 := by
+  induction ks generalizing vs₁ vs₂  with
+  | nil => simp [upsert]
+  | cons k' ks ih =>
+    cases vs₁ with
+    | nil =>
+      cases vs₂ with
+      | nil => simp [upsert]
+      | cons => contradiction
+    | cons =>
+      cases vs₂ with
+      | nil => contradiction
+      | cons =>
+        simp at h
+        simp [upsert]
+        split <;> simp
+        apply ih _ _ h
+
+theorem upsert_2_map {β₁ β₂} (ks : List α) (vs : List β₁) (f : β₁ → β₂) (k : α)
+  (f₁ : Option β₁ → β₁) (f₂ : Option β₂ → β₂)
+  (hf : ∀ x : Option β₁, f (f₁ x) = f₂ (x.map f)) :
+  (upsert ks vs k f₁).2.map f = (upsert ks (vs.map f) k f₂).2 := by
+  induction ks generalizing vs  with
+  | nil => simp [upsert, hf]
+  | cons k' ks ih =>
+    cases vs with
+    | nil => simp [upsert, hf]
+    | cons =>
+      simp [upsert]
+      split <;> simp [hf]
+      apply ih
+
 end AssocList
 
 namespace AssocArray
@@ -402,6 +440,20 @@ theorem find?_upsert_ne (ks : Array α) (vs : Array β) (k₁ k₂ : α) (f : Op
   simp [upsert_spec, find?_spec]
   apply AssocList.find?_upsert_ne (h := h)
 
+theorem upsert_1_congr {β₁ β₂} (ks : Array α) (vs₁ : Array β₁) (vs₂ : Array β₂) (k : α)
+  (f₁ : Option β₁ → β₁) (f₂ : Option β₂ → β₂) (h : vs₁.size = vs₂.size) :
+  (upsert ks vs₁ k f₁).1 = (upsert ks vs₂ k f₂).1 := by
+  simp [upsert_spec]
+  apply AssocList.upsert_1_congr
+  apply h
+
+theorem upsert_2_map {β₁ β₂} (ks : Array α) (vs : Array β₁) (f : β₁ → β₂) (k : α)
+  (f₁ : Option β₁ → β₁) (f₂ : Option β₂ → β₂)
+  (hf : ∀ x : Option β₁, f (f₁ x) = f₂ (x.map f)) :
+  (upsert ks vs k f₁).2.map f = (upsert ks (vs.map f) k f₂).2 := by
+  simp [upsert_spec]
+  apply AssocList.upsert_2_map
+  apply hf
 
 end AssocArray
 
@@ -738,10 +790,13 @@ theorem insert_go_spec (t : Trie α β) (ks : Array α) (i : Nat) (v : β):
     next hi =>
       simp [uncompress, Array.Trie.insert.go, hi]
       constructor
-      -- Array.map commutes with AssocArray.upsert
-      · sorry
-      · sorry
+      · apply AssocArray.upsert_1_congr
+        simp
+      · apply AssocArray.upsert_2_map
+        intro x
+        rw [insert_go_spec]
+        cases x <;> rfl
     next hi0 =>
       simp [insert.go, *, uncompress, Array.Trie.insert.go]
 termination_by ks.size - i
-decreasing_by simp_wf; omega
+decreasing_by all_goals simp_wf; omega
