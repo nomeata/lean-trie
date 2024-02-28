@@ -105,6 +105,10 @@ theorem Array.modify_data {α} (as : Array α) (i : Nat) (f : α → α) (h : i 
 theorem Array.data_getElem {α} (as : Array α) (i : Nat) (h : i < as.size) :
   as.data[i] = as[i] := rfl
 
+theorem Array.size_extract {α} (as : Array α) (start stop : Nat) :
+    Array.size (Array.extract as start stop) = min stop (Array.size as) - start :=
+  by sorry
+
 -- TODO: Lemma has wrong name in std
 axiom Array.getElem_mem :
   ∀ {α : Type u} {i : Nat} (a : Array α) (h : i < Array.size a), a[i] ∈ a
@@ -496,3 +500,108 @@ theorem find?_insert_neq (t : Trie α β) (k k' : Array α) (hne : k ≠ k') (v 
 end Trie
 
 end Trie.Array
+
+namespace Trie.Compressed
+
+/--
+Now additing path compression.
+-/
+inductive Trie (α : Type u) (β : Type v) where
+  | leaf (val : Option β)
+  | path (val : Option β) (ps : Array α) (hps : 0 < ps.size) (t : Trie α β) : Trie α β
+  | node (val : Option β) (ks : Array α) (vs : Array (Trie α β)) : Trie α β
+
+namespace Trie
+
+def empty : Trie α β := .leaf none
+
+def commonPrefix (xs : Array α) (ys : Array α) (offset1 : Nat) : Nat :=
+  let rec loop (i : Nat) : Nat :=
+    if h : offset1 + i < xs.size then
+      if h' : i < ys.size then
+        if xs[offset1 + i] = ys[i] then
+          loop (i + 1)
+        else
+          i
+      else
+        i
+    else
+      i
+    termination_by ys.size - i
+  loop 0
+
+def hasPrefix (xs : Array α) (ys : Array α) (offset1 : Nat) : Bool :=
+  let rec loop (i : Nat) : Bool :=
+    if h' : i < ys.size then
+      if h : offset1 + i < xs.size then
+        if xs[offset1 + i] = ys[i] then
+          loop (i + 1)
+        else
+          false
+      else
+        false
+    else
+      true
+    termination_by ys.size - i
+  loop 0
+
+def mkPath (ps : Array α) (t : Trie α β) : Trie α β :=
+  if h : 0 < ps.size  then .path none ps h t else t
+
+def insert (t : Trie α β) (ks : Array α) (v : β) : Trie α β := go 0 t where
+  go (i : Nat)
+    | .leaf val =>
+      if h : i < ks.size then
+        path val (ks.extract i ks.size) (by simp [Array.size_extract]; omega) (.leaf (some v))
+      else
+        .leaf (some v)
+    | .path val ps hps t =>
+      if h : i < ks.size then
+        let j := commonPrefix ks ps i
+        if hj : 0 < j then
+          -- split common prefix, continue
+          .path val (ps.extract 0 j) (by simp [Array.size_extract];omega) <| go (i + j) <|
+              .mkPath (ps.extract j ps.size) t
+        else
+          -- no common prefix, split off first key
+          let c := ks[i]
+          let c' := ps[j]'(by omega)
+          let t := mkPath (ks.extract (i+1) ks.size) (.leaf (some v))
+          let t'' := mkPath (ps.extract 1 ps.size) t
+          .node val #[c, c'] #[t, t'']
+      else
+        .path (some v) ps hps t
+    | .node val ks' vs =>
+      if h : i < ks.size then
+        let (ks'', vs'') := AssocArray.upsert ks' vs ks[i] fun t? =>
+          go (i + 1) (t?.getD empty)
+        .node val ks'' vs''
+      else
+        .node (some v) ks' vs
+  termination_by ks.size - i
+  decreasing_by all_goals simp_wf; omega
+
+def find? (t : Trie α β) (ks : Array α) : Option β := go 0 t where
+  go (i : Nat)
+    | .leaf val =>
+      if i < ks.size then
+        none
+      else
+        val
+    | path val ps _ t' =>
+      if i < ks.size then
+        if hasPrefix ks ps i then
+          go (i + ps.size) t'
+        else
+          none
+      else
+        val
+    | .node val ks' vs =>
+      if h : i < ks.size then
+        match AssocArray.find? ks' vs ks[i] with
+        | none => none
+        | some t => go (i + 1) t
+      else
+        val
+  termination_by ks.size - i
+  decreasing_by all_goals simp_wf; omega
