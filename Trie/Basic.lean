@@ -112,7 +112,7 @@ theorem Array.size_extract {α} (as : Array α) (start stop : Nat) :
 theorem Array.get_extract {α} {i : Nat} {as : Array α} {start stop : Nat} (h : i < Array.size (Array.extract as start stop)) :
  (Array.extract as start stop)[i] = as[start + i]'(by simp [Array.size_extract] at *; omega) := sorry
 
-theorem Array.attach {α} (as : Array α) : Array {x : α // x ∈ as} := by sorry
+def Array.attach {α} (as : Array α) : Array {x : α // x ∈ as} := by sorry
 
 
 @[simp]
@@ -154,7 +154,7 @@ def insert (t : Trie α β) (ks : Array α) (v : β) : Trie α β := go t 0
     .node (some v) t.c
   termination_by ks.size - i
 
-derive_induction insert.go
+derive_functional_induction insert.go
 
 def find? (t : Trie α β) (ks : Array α) : Option β := go t 0
   where
@@ -166,7 +166,7 @@ def find? (t : Trie α β) (ks : Array α) : Option β := go t 0
     t.val
   termination_by ks.size - i
 
-derive_induction find?.go
+derive_functional_induction find?.go
 
 /-
 We first specify the operations on Arrays via their abstract counter-parts on lists.
@@ -326,7 +326,7 @@ def upsert (ks : Array α) (vs : Array β) (k : α) (f : Option β → β) : Arr
       (ks.push k, (vs.extract 0 i).push (f none))
   termination_by ks.size - i
 
-derive_induction upsert.go
+derive_functional_induction upsert.go
 
 @[simp]
 theorem upsert_nil (k : α) (f : Option β → β) : upsert #[] #[] k f = (#[k], #[f none]) := rfl
@@ -394,7 +394,7 @@ def find?' (ks : Array α) (vs : Array β) (k : α) : Option {x : β // x ∈ vs
       none
   termination_by ks.size - i
 
-derive_induction find?'.go
+derive_functional_induction find?'.go
 
 def find? (ks : Array α) (vs : Array β) (k : α) : Option β := (find?' ks vs k).map (·.val)
 
@@ -479,6 +479,8 @@ def insert (t : Trie α β) (ks : Array α) (v : β) : Trie α β := go t 0 wher
         .node (some v) ks' vs
   termination_by _ i => ks.size - i
 
+derive_functional_induction insert.go
+
 def find? (t : Trie α β) (ks : Array α) : Option β := go t 0 where
   go | .node val ks' vs, i =>
       if h : i < ks.size then
@@ -489,7 +491,7 @@ def find? (t : Trie α β) (ks : Array α) : Option β := go t 0 where
         val
   termination_by _ i => ks.size - i
 
-derive_induction find?.go
+derive_functional_induction find?.go
 
 def toAbstractArray : Trie α β → AbstractArray.Trie α β
   | .node val ks vs => .node val fun k =>
@@ -525,13 +527,16 @@ theorem find?_go_spec (t : Trie α β) (ks : Array α) (i : Nat) :
     unfold AbstractArray.Trie.find?.go
     simp only [hi, ↓reduceDite]
     simp only [toAbstractArray_eq, Option.getD, Abstract.Trie.c, IH]
-    split <;> simp
-  case case2 v ks' vs i hi =>
+  case case2 v ks' vs i hi t hfind IH =>
     unfold find?.go
     unfold AbstractArray.Trie.find?.go
     simp only [hi, ↓reduceDite]
-    simp only [toAbstractArray_eq, Abstract.Trie.val]
-    done
+    simp only [toAbstractArray_eq, Option.getD, Abstract.Trie.c, IH, hfind]
+  case case3 val v val' i hi =>
+    unfold find?.go
+    unfold AbstractArray.Trie.find?.go
+    simp only [hi, ↓reduceDite]
+    simp only [Abstract.Trie.val, toAbstractArray_eq]
 
 theorem find?_spec (t : Trie α β) (ks : Array α):
     t.find? ks = t.toAbstractArray.find? ks := by
@@ -539,15 +544,23 @@ theorem find?_spec (t : Trie α β) (ks : Array α):
 
 theorem insert_go_spec (t : Trie α β) (ks : Array α) (i : Nat) (v : β):
     (insert.go ks v t i).toAbstractArray  = AbstractArray.Trie.insert.go ks v t.toAbstractArray i := by
-  induction t, i using find?.go.induct (ks := ks)
-  case case1 v ks' vs i hi IH =>
+  induction t, i using insert.go.induct (ks := ks) (v := v)
+  case case1 val ks' vs i hi ks'' vs'' hfind IH =>
     unfold insert.go AbstractArray.Trie.insert.go
     simp only [hi, ↓reduceDite]
     simp only [toAbstractArray_eq, Abstract.Trie.c]
+    -- this is ugly:
+    have := (Prod.eta _).trans hfind
+    simp at this; cases this
+    subst ks'' vs''
+    clear hfind
+
     congr 1
     funext k
     if h : k = ks[i] then
-      simp only [↓reduceIte, h, AssocArray.find?_upsert_eq, IH, fun_upd_eq]
+      simp only [↓reduceIte, h]
+      simp only [AssocArray.find?_upsert_eq, fun_upd_eq]
+      rw [IH]
       simp [Option.getD]
       split <;> simp [*]
     else
@@ -622,7 +635,7 @@ def hasPrefix (xs : Array α) (ys : Array α) (offset1 : Nat) : Bool :=
       true
     termination_by ys.size - i
   loop 0
-derive_induction hasPrefix.loop
+derive_functional_induction hasPrefix.loop
 
 
 theorem commonPrefix_loop_of_hasPrefix_loop (xs : Array α) (ys : Array α) (offset1 i : Nat)
@@ -705,7 +718,7 @@ def find? (t : Trie α β) (ks : Array α) : Option β := go 0 t where
   termination_by i => ks.size - i
   decreasing_by all_goals simp_wf; omega
 
-derive_induction find?.go
+derive_functional_induction find?.go
 
 def uncompressPath (val : Option β) (ps : Array α) (i : Nat) (t : Array.Trie α β) : Array.Trie α β :=
   if h : i < ps.size then
@@ -713,7 +726,7 @@ def uncompressPath (val : Option β) (ps : Array α) (i : Nat) (t : Array.Trie �
   else
     t
 termination_by ps.size - i
-derive_induction uncompressPath
+derive_functional_induction uncompressPath
 
 
 noncomputable
