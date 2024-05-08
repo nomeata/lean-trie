@@ -1,3 +1,6 @@
+import Lean.Data.AssocList
+
+open Lean (AssocList)
 
 set_option autoImplicit false
 
@@ -8,16 +11,27 @@ variable [DecidableEq α]
 variable {β : Type v}
 
 
-def fun_upd : (d : β) → (α → Option β) → α → (β → β) → (α → Option β) :=
-  fun d f x k x' => if x' = x then some (k ((f x').getD d)) else f x'
+def fun_upd : (α → Option β) → α → (Option β → β) → (α → Option β) :=
+  fun f x k x' => if x' = x then some (k ((f x'))) else f x'
 
-theorem fun_upd_eq (d : β) (f : α → Option β) (x : α) (k : β → β) :
-  (fun_upd d f x k x) = some (k ((f x).getD d)) := by
+theorem fun_upd_eq (f : α → Option β) (x : α) (k : Option β → β) :
+  (fun_upd f x k x) = some (k (f x)) := by
   simp [fun_upd]
 
-theorem fun_upd_ne (d : β) (f : α → Option β) (x₁ x₂ : α) (k : β → β) (h : x₂ ≠ x₁):
-  (fun_upd d f x₁ k x₂) = f x₂ := by
+theorem fun_upd_ne (f : α → Option β) (x₁ x₂ : α) (k : Option β → β) (h : x₂ ≠ x₁):
+  (fun_upd f x₁ k x₂) = f x₂ := by
   simp [fun_upd, h]
+
+theorem map_fun_upd_congr {β'}
+    (f : α → Option β) (t : β → β') (x : α) (k : Option β → β) (k' : Option β' → β')
+    (h : ∀ y?, t (k y?) = k' (y?.map t))
+    : (fun x' => Option.map t (fun_upd f x k x')) = fun_upd (fun x' => Option.map t (f x')) x k' := by
+  unfold fun_upd
+  ext k' : 1
+  split
+  · simp [fun_upd, Option.map, h]
+  · rfl
+
 
 namespace Trie.Abstract
 
@@ -30,21 +44,18 @@ inductive Trie (α : Type u) (β : Type v) where
 
 namespace Trie
 
+def val : Trie α β → Option β | .node v _ => v
+@[simp] theorem val_eq (v : Option β) (cs : α → Option (Trie α β)) : val (.node v cs) = v := by rfl
 
-@[simp]
-def val : Trie α β → Option β
-  | .node v _ => v
-
-@[simp]
-def c : Trie α β → α → Option (Trie α β)
-  | .node _ c => c
+def c : Trie α β → (α → Option (Trie α β)) | .node _ c => c
+@[simp] theorem c_eq (v : Option β) (cs : α → Option (Trie α β)) : c (.node v cs) = cs := by rfl
 
 def empty : Trie α β := .node none (fun _ => .none)
 
 def insert (t : Trie α β) : List α → β → Trie α β
   | [], v => .node (some v) t.c
   | k::ks, v => .node t.val <|
-      fun_upd empty t.c k fun t => t.insert ks v
+      fun_upd t.c k fun t => t.getD empty |>.insert ks v
 
 def find? (t : Trie α β) : List α → Option β
   | [] => t.val
@@ -86,8 +97,370 @@ theorem find?_insert_neq (t : Trie α β) (k k' : List α) (hne : k ≠ k') (v :
 
 
 end Trie
-
 end Trie.Abstract
+
+namespace Lean.AssocList
+
+/-! Missing definitions and lemmas about Lean.AssocList -/
+
+def upsert (xs : AssocList α β) (k : α) (f : Option β → β) : AssocList α β :=
+  match xs with
+  | .cons k' v xs =>
+    if k = k' then
+      .cons k' (f (some v)) xs
+    else
+      .cons k' v (upsert xs k f)
+  | .nil => .cons k (f none) .nil
+
+theorem find?_upsert (xs : AssocList α β) (k1 k2 : α) (f : Option β → β) :
+    (xs.upsert k1 f).find? k2 = fun_upd (xs.find? ·) k1 f k2 := by
+  induction xs, k1, f using upsert.induct
+  case case1 f k2 v xs =>
+    simp [upsert, find?, fun_upd]
+    split
+    · simp_all
+    · apply (if_neg (Ne.symm _)).symm
+      simp_all
+  case case2 k1 f k v xs hne ih =>
+    simp [upsert, find?, hne, fun_upd]
+    split
+    next heq =>
+      simp at heq; subst heq
+      simp [if_neg (Ne.symm _), hne]
+    next =>
+      rw [ih]
+      rfl
+  case case3 k1 f =>
+    simp [upsert, find?, fun_upd]
+    split
+    · simp_all
+    · apply (if_neg (Ne.symm _)).symm
+      simp_all
+
+
+/-- Fused find and map with sizeOf information -/
+def findSized? {γ} [SizeOf β] (xs : AssocList α β) (a : α) (f : (x : β) → (sizeOf x < sizeOf xs) → γ) :
+    Option γ :=
+  match xs with
+  | nil         => none
+  | cons k v es => match k == a with
+    | true  => some (f v (by simp; omega))
+    | false => findSized? es a (fun k _ => f k (by simp; omega))
+
+@[simp]
+def findSized?_eq_find?_map
+  {γ} [SizeOf β] (xs : AssocList α β) (k : α) (f : (x : β) → γ) :
+  findSized? xs k (fun y _ => f y) = (xs.find? k).map f := by
+  induction xs <;> simp_all [findSized?, find?, Option.map]
+  split <;> simp [*]
+
+def mapSized {γ} [SizeOf β] (xs : AssocList α β) (f : (x : β) → (sizeOf x < sizeOf xs) → γ) :
+    AssocList α γ :=
+  match xs with
+  | nil         => nil
+  | cons k v es =>
+    cons k (f v (by simp; omega)) (es.mapSized (fun k _ => f k (by simp; omega)))
+
+@[simp]
+def mapSized_eq_mapVal {γ} [SizeOf β] (xs : AssocList α β) (f : (x : β) → γ) :
+    xs.mapSized (fun y _ => f y) = xs.mapVal f := by
+  induction xs <;> simp_all [mapSized, mapVal]
+
+theorem mapVal_upsert_congr {β'}
+    (xs : AssocList α β)
+    (t : β → β') (k : α) (f : Option β → β) (f' : Option β' → β')
+    (h : ∀ y?, t (f y?) = f' (y?.map t))
+    : (xs.upsert k f).mapVal t = (xs.mapVal t).upsert k f' := by
+  sorry
+
+end Lean.AssocList
+
+namespace Trie.AssocList
+
+/-!
+Refinement: Using associative lists instead of the abstract function
+-/
+
+inductive Trie (α : Type u) (β : Type v) where
+  | node (val : Option β) (c : AssocList α (Trie α β)) : Trie α β
+
+namespace Trie
+
+def val : Trie α β → Option β | .node v _ => v
+@[simp] theorem val_eq (v : Option β) (cs : AssocList α (Trie α β)) : val (.node v cs) = v := by rfl
+
+def c : Trie α β → AssocList α (Trie α β) | .node _ c => c
+@[simp] theorem c_eq (v : Option β) (cs : AssocList α (Trie α β)) : c (.node v cs) = cs := by rfl
+
+def empty : Trie α β := .node none .empty
+
+def insert (t : Trie α β) : List α → β → Trie α β
+  | [], v => .node (some v) t.c
+  | k::ks, v => .node t.val <|
+      t.c.upsert k fun t => (t.getD empty).insert ks v
+
+def find? (t : Trie α β) : List α → Option β
+  | [] => t.val
+  | k::ks => match t.c.find? k with
+    | none => none
+    | some t => t.find? ks
+
+/-! We can relate these tries with the more abstract one -/
+
+def abstract : Trie α β → Trie.Abstract.Trie α β
+  | .node val? c => .node val? (fun k => c.findSized? k (fun t _ => t.abstract))
+decreasing_by simp_wf; omega
+
+@[simp]
+theorem val_abstract (t : Trie α β) :
+    t.abstract.val = t.val := by
+  cases t; simp [Option.map, abstract]
+
+theorem c_abstract (t : Trie α β) :
+    t.abstract.c = (fun k => (t.c.find? k).map (·.abstract)) := by
+  cases t
+  simp [Option.map, abstract]
+
+/-! Use this abstraction function to give specification for the operations -/
+
+@[simp]
+theorem empty_spec :
+    (empty : Trie α β).abstract = .empty := by
+  simp [abstract, empty, Trie.Abstract.Trie.empty]
+  rfl
+
+theorem find?_spec (t : Trie α β) (ks : List α):
+    t.find? ks = t.abstract.find? ks := by
+  induction t, ks using find?.induct
+  case case1 t =>
+    simp [find?, abstract, Trie.Abstract.Trie.find?]
+  case case2 t k ks h =>
+    simp [find?, Trie.Abstract.Trie.find?, h, c_abstract]
+  case case3 t k ks h ih =>
+    simpa only [find?, Trie.Abstract.Trie.find?, h, c_abstract] using ih
+
+theorem insert_spec (t : Trie α β) (ks : List α) (v : β) :
+    (insert t ks v).abstract = t.abstract.insert ks v := by
+  induction t, ks, v using insert.induct
+  case case1 t v =>
+    simp [insert, abstract, Trie.Abstract.Trie.insert, c_abstract]
+  case case2 t k ks ih =>
+    simp [insert, abstract, Trie.Abstract.Trie.insert, c_abstract, AssocList.find?_upsert]
+    apply map_fun_upd_congr
+    intro t?
+    rw [ih]; clear ih
+    cases t? <;> simp
+
+/-! And get the theory for free -/
+
+theorem find?_empty (k : List α) : find? (empty : Trie α β) k = none := by
+  simp [find?_spec, Trie.Abstract.Trie.find?_empty, empty_spec]
+
+theorem find?_insert_eq (t : Trie α β) (k : List α) (v : β) :
+    (t.insert k v).find? k = some v := by
+  simpa [insert_spec, find?_spec] using Trie.Abstract.Trie.find?_insert_eq _ _ _
+
+theorem find?_insert_neq (t : Trie α β) (k k' : List α) (hne : k ≠ k') (v : β) :
+    (t.insert k v).find? k' = t.find? k' := by
+  simpa [insert_spec, find?_spec] using Trie.Abstract.Trie.find?_insert_neq _ _ _ hne _
+
+end Trie
+end Trie.AssocList
+
+namespace Trie.CompressedList
+
+/--
+Now adding path compression
+-/
+
+inductive Trie (α : Type u) (β : Type v) where
+  | leaf (val : Option β)
+  | path (val : Option β) (ps : List α) (hps : ps ≠ []) (t : Trie α β) : Trie α β
+  | node (val : Option β) (c : AssocList α (Trie α β)) : Trie α β
+
+namespace Trie
+
+def empty : Trie α β := .leaf none
+
+def commonPrefix : (xs ys : List α) → List α
+  | _ , [] => []
+  | [], _  => []
+  | x::xs, y::ys =>
+    if x = y then
+      x :: commonPrefix xs ys
+    else
+      []
+
+def hasPrefix : (xs ys : List α) → Bool
+  | _ , [] => true
+  | [], _ => false
+  | x::xs, y::ys =>
+    if x = y then
+      hasPrefix xs ys
+    else
+      false
+
+theorem commonPrefix_of_hasPrefix (xs ys : List α) (h : hasPrefix xs ys = true) :
+    commonPrefix xs ys = ys := by
+  induction xs, ys using commonPrefix.induct
+  case case1 => simp [commonPrefix]
+  case case2 => simp [hasPrefix] at h
+  case case3 x xs ys => simp_all [commonPrefix, hasPrefix]
+  case case4 x xs ys => simp_all [commonPrefix, hasPrefix]
+
+def mkPath (ps : List α) (t : Trie α β) : Trie α β :=
+  if h : ps = [] then t else .path none ps h t
+
+def insert (t : Trie α β) (ks : List α) (v : β) : Trie α β := match t with
+  | .leaf val =>
+    if h : ks = [] then
+      .leaf (some v)
+    else
+      .path val ks h (.leaf (some v))
+  | .path val ps hps t' =>
+    if _h : ks = [] then
+      .path (some v) ps hps t'
+    else
+      let pfx := commonPrefix ks ps
+      if hpfx : pfx = [] then
+        have c::ks' := ks
+        have c'::ps' := ps
+        let t := mkPath ks' (.leaf (some v))
+        let t'' := mkPath ps' t'
+        .node val (.cons c' t'' (.cons c t .nil)) -- order matters for refinement proof!
+      else
+          -- split common prefix, continue
+          .path val pfx hpfx <| insert
+            (.mkPath (ps.drop pfx.length) t')
+            (ks.drop pfx.length)
+            v
+    | .node val cs =>
+      match ks with
+      | [] => .node (some v) cs
+      | c::ks => .node val (cs.upsert c fun t? => (t?.getD empty).insert ks v)
+termination_by ks.length
+decreasing_by
+· simp_wf
+  rw [← List.length_eq_zero] at hpfx _h
+  simp [pfx] at hpfx
+  omega
+· simp_wf
+
+def find? : (t : Trie α β) → (ks : List α) → Option β
+  | .leaf val, [] => val
+  | .leaf _, (_::_) => none
+  | .path val _ _ _, [] => val
+  | .path _ ps _ t', ks@(_::_) =>
+    if hasPrefix ks ps then
+      t'.find? (ks.drop ps.length)
+    else
+      none
+  | .node val _cs, [] => val
+  | .node _val cs, k::ks =>
+    match cs.find? k with
+    | none => none
+    | some t => t.find? ks
+termination_by _ ks => ks.length
+decreasing_by
+· simp_wf
+  subst_vars
+  cases ps; contradiction;
+  simp
+  omega
+· simp_wf
+
+def uncompressPath (val : Option β) (ps : List α) (t : AssocList.Trie α β) : AssocList.Trie α β :=
+  match ps with
+  | [] => t
+  | p::ps => .node val (.cons p (uncompressPath none ps t) .nil)
+
+def uncompress : Trie α β → AssocList.Trie α β
+  | .leaf val => .node val .nil
+  | .node val cs => .node val (cs.mapSized fun t _ => t.uncompress)
+  | .path val ps _ t => uncompressPath val ps t.uncompress
+
+@[simp]
+theorem empty_spec : (empty : Trie α β).uncompress = .empty := by rfl
+
+@[simp]
+theorem uncompressPath_eq_insert (ks : List α) (v : β) :
+   uncompressPath none ks (AssocList.Trie.node (some v) AssocList.nil) =
+    AssocList.Trie.empty.insert ks v := by
+  induction ks <;>
+    simp_all [uncompressPath, AssocList.upsert, AssocList.Trie.insert, AssocList.Trie.empty]
+
+@[simp]
+theorem uncompress_mkPath (ps : List α) (t : Trie α β) :
+    (mkPath ps t).uncompress = uncompressPath none ps t.uncompress := by
+  cases ps <;> simp [mkPath, uncompressPath, uncompress]
+
+
+theorem uncompressPath_insert_eq_commonPrefix (ps ks : List α) (t : AssocList.Trie α β) (v : β):
+    (uncompressPath none ps t).insert ks v =
+    uncompressPath none (commonPrefix ks ps)
+    ((uncompressPath none (List.drop (commonPrefix ks ps).length ps) t).insert
+      (List.drop (commonPrefix ks ps).length ks) v) := by
+  induction ks, ps using commonPrefix.induct
+  · simp [uncompressPath, commonPrefix, *]
+  · simp [uncompressPath, commonPrefix, *]
+  · simp [uncompressPath, commonPrefix, AssocList.Trie.insert, AssocList.upsert, *]
+  · simp [uncompressPath, commonPrefix, *]
+
+theorem insert_spec (t : Trie α β) (ks : List α) (v : β) :
+    (insert t ks v).uncompress = t.uncompress.insert ks v := by
+  -- Bug in functional induction!
+  -- induction t, ks, v using insert.induct
+  unfold insert
+  split
+  next t val =>
+    cases ks
+    next =>
+      simp [uncompress, AssocList.Trie.insert]
+    next k ks =>
+      simp [uncompress, AssocList.Trie.insert, uncompressPath, AssocList.upsert,
+        uncompressPath_eq_insert]
+  next ps _ t'=>
+    match ks with
+    | [] =>
+      cases ps; contradiction
+      simp [uncompress, uncompressPath, AssocList.Trie.insert]
+    | (k::ks) =>
+      have p::ps := ps
+      simp only [↓reduceDite, ne_eq]
+      match hpfx : commonPrefix (k::ks) (p::ps) with
+      | [] =>
+        simp only [↓reduceDite]
+        simp [commonPrefix] at hpfx
+        simp [uncompress, uncompressPath, AssocList.Trie.insert, AssocList.mapSized,
+          AssocList.upsert, hpfx]
+      | p1::ps =>
+        simp [uncompress, AssocList.Trie.insert, uncompressPath]
+        simp [commonPrefix] at hpfx
+        split at hpfx <;> try contradiction
+        simp at hpfx
+        cases hpfx
+        subst p k ps
+        rw [insert_spec]
+        simp [AssocList.upsert, uncompress]
+        rw [← uncompressPath_insert_eq_commonPrefix]
+  next t val cs =>
+    match ks with
+    | [] => simp [uncompress, AssocList.Trie.insert]
+    | (k::ks) =>
+      simp [uncompress, AssocList.Trie.insert]
+      apply AssocList.mapVal_upsert_congr
+      intro t?
+      rw [insert_spec]
+      match t? with
+      | none => simp
+      | some t' => simp
+termination_by ks.length
+
+end Trie
+end Trie.CompressedList
+
+
+#exit
 
 theorem Array.drop_data_cons {α : Type _} (as : Array α) (i : Nat) (h : i < as.size) :
   as.data.drop i = as[i] :: as.data.drop (i + 1) := by sorry
@@ -137,7 +510,7 @@ axiom Array.getElem_mem :
 namespace Trie.AbstractArray
 
 /--
-Like `Trie.Abstract.Trie`, but the operations (not the implementation!) uses arrays for keys.
+Like `Trie.Abstract.Trie`, but the operations (not the data structure) uses arrays for keys.
 -/
 abbrev Trie := @Trie.Abstract.Trie
 
@@ -746,6 +1119,11 @@ theorem uncompress_mkPath (ps : Array α) (t : Trie α β):
   next hps => simp [uncompress]
   next hps => unfold uncompressPath; simp [hps]
 
+theorem uncompressPath_node_eq_insert
+  (val : Option β) (ks : Array α) (i : Nat) (v : β) :
+  uncompressPath val ks i (Array.Trie.node (some v) #[] #[]) =
+  Array.Trie.insert.go ks v (Array.Trie.node val #[] #[]) i := by sorry
+
 
 theorem insert_go_spec (t : Trie α β) (ks : Array α) (i : Nat) (v : β):
     (insert.go ks v i t).uncompress  = .insert.go ks v t.uncompress i := by
@@ -755,7 +1133,7 @@ theorem insert_go_spec (t : Trie α β) (ks : Array α) (i : Nat) (v : β):
     split
     next hi =>
       simp [uncompress]
-      sorry -- insert into leaf is uncompressPath
+      exact uncompressPath_node_eq_insert ..
     next hi0 =>
       simp [insert.go, *, uncompress, Array.Trie.insert.go]
   | path val ps hps t' =>
