@@ -171,10 +171,19 @@ theorem mapVal_upsert_congr {β'}
     (t : β → β') (k : α) (f : Option β → β) (f' : Option β' → β')
     (h : ∀ y?, t (f y?) = f' (y?.map t))
     : (xs.upsert k f).mapVal t = (xs.mapVal t).upsert k f' := by
-  sorry
+  induction xs
+  · simp_all [upsert, mapVal]
+  · simp only [upsert]
+    split
+    · simp_all [upsert, mapVal]
+    · simp_all [upsert, mapVal]
 
 @[simp] theorem find?_mapVal {β'} (xs : AssocList α β) (f : β → β') (k : α):
-  (xs.mapVal f).find? k = (xs.find? k).map f := by sorry
+  (xs.mapVal f).find? k = (xs.find? k).map f := by
+  induction xs
+  · simp_all [find?, mapVal]
+  · simp only [find?]
+    split <;> simp_all
 
 
 end Lean.AssocList
@@ -424,12 +433,37 @@ theorem uncompressPath_insert_eq_commonPrefix (ps ks : List α) (t : AssocList.T
 theorem uncompressPath_find_of_hasPrefix ps (t : AssocList.Trie α β) ks
     (h : hasPrefix ks ps = true) :
     (uncompressPath none ps t).find? ks = t.find? (List.drop ps.length ks) := by
-  sorry
+  induction ks generalizing ps
+  · match ps with
+    | [] => simp [uncompressPath, AssocList.Trie.find?]
+    | _::_ => simp [hasPrefix] at h
+  next k v ks ih =>
+    match ps with
+    | [] => simp [uncompressPath, AssocList.Trie.find?]
+    | _::_ =>
+      simp [hasPrefix] at h
+      have ⟨h1, h2⟩ := h; clear h
+      subst h1
+      simp_all [uncompressPath, AssocList.Trie.find?, AssocList.find?]
 
 theorem uncompressPath_find_of_not_hasPrefix ps (t : AssocList.Trie α β) ks
     (h : hasPrefix ks ps = false) :
     (uncompressPath none ps t).find? ks = none := by
-  sorry
+  induction ks generalizing ps
+  · match ps with
+    | [] => simp [hasPrefix] at h
+    | _::_ => simp [uncompressPath, AssocList.Trie.find?]
+  next k v ks ih =>
+    match ps with
+    | [] => simp [hasPrefix] at h
+    | _::_ =>
+      simp_all [uncompressPath, AssocList.Trie.find?, AssocList.find?]
+      split <;> try rfl
+      split at * <;> try contradiction
+      simp_all
+      subst_vars
+      simp [hasPrefix] at h
+      rw [ih _ h]
 
 theorem insert_spec (t : Trie α β) (ks : List α) (v : β) :
     (insert t ks v).uncompress = t.uncompress.insert ks v := by
