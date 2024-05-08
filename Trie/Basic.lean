@@ -154,8 +154,6 @@ def insert (t : Trie α β) (ks : Array α) (v : β) : Trie α β := go t 0
     .node (some v) t.c
   termination_by ks.size - i
 
-derive_functional_induction insert.go
-
 def find? (t : Trie α β) (ks : Array α) : Option β := go t 0
   where
   go t i := if h : i < ks.size then
@@ -165,8 +163,6 @@ def find? (t : Trie α β) (ks : Array α) : Option β := go t 0
   else
     t.val
   termination_by ks.size - i
-
-derive_functional_induction find?.go
 
 /-
 We first specify the operations on Arrays via their abstract counter-parts on lists.
@@ -326,8 +322,6 @@ def upsert (ks : Array α) (vs : Array β) (k : α) (f : Option β → β) : Arr
       (ks.push k, (vs.extract 0 i).push (f none))
   termination_by ks.size - i
 
-derive_functional_induction upsert.go
-
 @[simp]
 theorem upsert_nil (k : α) (f : Option β → β) : upsert #[] #[] k f = (#[k], #[f none]) := rfl
 
@@ -393,8 +387,6 @@ def find?' (ks : Array α) (vs : Array β) (k : α) : Option {x : β // x ∈ vs
     else
       none
   termination_by ks.size - i
-
-derive_functional_induction find?'.go
 
 def find? (ks : Array α) (vs : Array β) (k : α) : Option β := (find?' ks vs k).map (·.val)
 
@@ -479,8 +471,6 @@ def insert (t : Trie α β) (ks : Array α) (v : β) : Trie α β := go t 0 wher
         .node (some v) ks' vs
   termination_by _ i => ks.size - i
 
-derive_functional_induction insert.go
-
 def find? (t : Trie α β) (ks : Array α) : Option β := go t 0 where
   go | .node val ks' vs, i =>
       if h : i < ks.size then
@@ -490,8 +480,6 @@ def find? (t : Trie α β) (ks : Array α) : Option β := go t 0 where
       else
         val
   termination_by _ i => ks.size - i
-
-derive_functional_induction find?.go
 
 def toAbstractArray : Trie α β → AbstractArray.Trie α β
   | .node val ks vs => .node val fun k =>
@@ -635,8 +623,6 @@ def hasPrefix (xs : Array α) (ys : Array α) (offset1 : Nat) : Bool :=
       true
     termination_by ys.size - i
   loop 0
-derive_functional_induction hasPrefix.loop
-
 
 theorem commonPrefix_loop_of_hasPrefix_loop (xs : Array α) (ys : Array α) (offset1 i : Nat)
     (hi : i ≤ ys.size) (h : hasPrefix.loop xs ys offset1 i = true) :
@@ -718,16 +704,12 @@ def find? (t : Trie α β) (ks : Array α) : Option β := go 0 t where
   termination_by i => ks.size - i
   decreasing_by all_goals simp_wf; omega
 
-derive_functional_induction find?.go
-
 def uncompressPath (val : Option β) (ps : Array α) (i : Nat) (t : Array.Trie α β) : Array.Trie α β :=
   if h : i < ps.size then
     .node val #[ps[i]] #[uncompressPath none ps (i + 1) t]
   else
     t
 termination_by ps.size - i
-derive_functional_induction uncompressPath
-
 
 noncomputable
 def uncompress : Trie α β → Array.Trie α β
