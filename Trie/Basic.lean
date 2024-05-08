@@ -173,6 +173,10 @@ theorem mapVal_upsert_congr {β'}
     : (xs.upsert k f).mapVal t = (xs.mapVal t).upsert k f' := by
   sorry
 
+@[simp] theorem find?_mapVal {β'} (xs : AssocList α β) (f : β → β') (k : α):
+  (xs.mapVal f).find? k = (xs.find? k).map f := by sorry
+
+
 end Lean.AssocList
 
 namespace Trie.AssocList
@@ -383,6 +387,17 @@ def uncompress : Trie α β → AssocList.Trie α β
 theorem empty_spec : (empty : Trie α β).uncompress = .empty := by rfl
 
 @[simp]
+theorem uncompressPath_val (ps : List α) (val : Option β) (h : ps ≠ []) (t : AssocList.Trie α β):
+  (uncompressPath val ps t).val = val := by
+  unfold uncompressPath
+  split; contradiction; simp
+
+@[simp]
+theorem uncompressPath_c (p : α) (ps : List α) (val : Option β) (t : AssocList.Trie α β):
+  (uncompressPath val (p::ps) t).c = .cons p (uncompressPath none ps t) .nil := by
+  simp [uncompressPath]
+
+@[simp]
 theorem uncompressPath_eq_insert (ks : List α) (v : β) :
    uncompressPath none ks (AssocList.Trie.node (some v) AssocList.nil) =
     AssocList.Trie.empty.insert ks v := by
@@ -405,6 +420,16 @@ theorem uncompressPath_insert_eq_commonPrefix (ps ks : List α) (t : AssocList.T
   · simp [uncompressPath, commonPrefix, *]
   · simp [uncompressPath, commonPrefix, AssocList.Trie.insert, AssocList.upsert, *]
   · simp [uncompressPath, commonPrefix, *]
+
+theorem uncompressPath_find_of_hasPrefix ps (t : AssocList.Trie α β) ks
+    (h : hasPrefix ks ps = true) :
+    (uncompressPath none ps t).find? ks = t.find? (List.drop ps.length ks) := by
+  sorry
+
+theorem uncompressPath_find_of_not_hasPrefix ps (t : AssocList.Trie α β) ks
+    (h : hasPrefix ks ps = false) :
+    (uncompressPath none ps t).find? ks = none := by
+  sorry
 
 theorem insert_spec (t : Trie α β) (ks : List α) (v : β) :
     (insert t ks v).uncompress = t.uncompress.insert ks v := by
@@ -455,6 +480,31 @@ theorem insert_spec (t : Trie α β) (ks : List α) (v : β) :
       | none => simp
       | some t' => simp
 termination_by ks.length
+
+theorem find?_spec (t : Trie α β) (ks : List α):
+    t.uncompress.find? ks = t.find? ks := by
+  induction t, ks using find?.induct
+  all_goals solve
+    | simp [uncompress, find?, AssocList.Trie.find?, AssocList.find?, *]
+  next ps _ _ _ _ hpfx _ =>
+    have p::ps := ps
+    simp [hasPrefix] at hpfx
+    cases hpfx with | _ heq hpfx =>
+    subst p
+    simp_all [uncompress, find?, AssocList.Trie.find?, AssocList.find?, hasPrefix,
+      uncompressPath_find_of_hasPrefix]
+  next ps _ _ _ _ hpfx =>
+    have p::ps := ps
+    simp_all [uncompress, find?, AssocList.Trie.find?, AssocList.find?, hasPrefix,
+      uncompressPath_find_of_hasPrefix]
+    split
+    · simp
+    next h =>
+      split at h <;> simp at h
+      subst h
+      rw [uncompressPath_find_of_not_hasPrefix]
+      apply hpfx
+      simp_all
 
 end Trie
 end Trie.CompressedList
