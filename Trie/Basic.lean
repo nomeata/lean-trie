@@ -32,6 +32,35 @@ theorem map_fun_upd_congr {β'}
   · simp [fun_upd, Option.map, h]
   · rfl
 
+section Prefix
+
+def commonPrefix : (xs ys : List α) → List α
+  | _ , [] => []
+  | [], _  => []
+  | x::xs, y::ys =>
+    if x = y then
+      x :: commonPrefix xs ys
+    else
+      []
+
+def hasPrefix : (xs ys : List α) → Bool
+  | _ , [] => true
+  | [], _ => false
+  | x::xs, y::ys =>
+    if x = y then
+      hasPrefix xs ys
+    else
+      false
+
+theorem commonPrefix_of_hasPrefix (xs ys : List α) (h : hasPrefix xs ys = true) :
+    commonPrefix xs ys = ys := by
+  induction xs, ys using commonPrefix.induct
+  case case1 => simp [commonPrefix]
+  case case2 => simp [hasPrefix] at h
+  case case3 x xs ys => simp_all [commonPrefix, hasPrefix]
+  case case4 x xs ys => simp_all [commonPrefix, hasPrefix]
+
+end Prefix
 
 namespace Trie.Abstract
 
@@ -277,6 +306,77 @@ theorem find?_insert_neq (t : Trie α β) (k k' : List α) (hne : k ≠ k') (v :
     (t.insert k v).find? k' = t.find? k' := by
   simpa [insert_spec, find?_spec] using Trie.Abstract.Trie.find?_insert_neq _ _ _ hne _
 
+
+/- A path is a trie where every node has one child -/
+
+def path (val : Option β) (ps : List α) (t : Trie α β) : Trie α β :=
+  match ps with
+  | [] => t
+  | p::ps => .node val (.cons p (path none ps t) .nil)
+
+@[simp]
+theorem path_val (ps : List α) (val : Option β) (h : ps ≠ []) (t : Trie α β):
+  (path val ps t).val = val := by
+  unfold path
+  split; contradiction; simp
+
+@[simp]
+theorem path_c (p : α) (ps : List α) (val : Option β) (t : Trie α β):
+  (path val (p::ps) t).c = .cons p (path none ps t) .nil := by
+  simp [path]
+
+@[simp]
+theorem path_eq_insert (ks : List α) (v : β) :
+   path none ks (node (some v) .nil) = empty.insert ks v := by
+ induction ks <;>
+    simp_all [path, AssocList.upsert, insert, empty]
+
+theorem path_insert_eq_commonPrefix (ps ks : List α) (t : Trie α β) (v : β):
+    (path none ps t).insert ks v =
+      path none (commonPrefix ks ps)
+        ((path none (List.drop (commonPrefix ks ps).length ps) t).insert
+          (List.drop (commonPrefix ks ps).length ks) v) := by
+  induction ks, ps using commonPrefix.induct
+  · simp [path, commonPrefix, *]
+  · simp [path, commonPrefix, *]
+  · simp [path, commonPrefix, AssocList.Trie.insert, AssocList.upsert, *]
+  · simp [path, commonPrefix, *]
+
+theorem path_find_of_hasPrefix ps (t : AssocList.Trie α β) ks
+    (h : hasPrefix ks ps = true) :
+    (path none ps t).find? ks = t.find? (List.drop ps.length ks) := by
+  induction ks generalizing ps
+  · match ps with
+    | [] => simp [path, find?]
+    | _::_ => simp [hasPrefix] at h
+  next k v ks ih =>
+    match ps with
+    | [] => simp [path, find?]
+    | _::_ =>
+      simp [hasPrefix] at h
+      have ⟨h1, h2⟩ := h; clear h
+      subst h1
+      simp_all [path, find?, AssocList.find?]
+
+theorem path_find_of_not_hasPrefix ps (t : Trie α β) ks
+    (h : hasPrefix ks ps = false) :
+    (path none ps t).find? ks = none := by
+  induction ks generalizing ps
+  · match ps with
+    | [] => simp [hasPrefix] at h
+    | _::_ => simp [path, find?]
+  next k v ks ih =>
+    match ps with
+    | [] => simp [hasPrefix] at h
+    | _::_ =>
+      simp_all [path, AssocList.find?, find?]
+      split <;> try rfl
+      split at * <;> try contradiction
+      simp_all
+      subst_vars
+      simp [hasPrefix] at h
+      rw [ih _ h]
+
 end Trie
 end Trie.AssocList
 
@@ -294,32 +394,6 @@ inductive Trie (α : Type u) (β : Type v) where
 namespace Trie
 
 def empty : Trie α β := .leaf none
-
-def commonPrefix : (xs ys : List α) → List α
-  | _ , [] => []
-  | [], _  => []
-  | x::xs, y::ys =>
-    if x = y then
-      x :: commonPrefix xs ys
-    else
-      []
-
-def hasPrefix : (xs ys : List α) → Bool
-  | _ , [] => true
-  | [], _ => false
-  | x::xs, y::ys =>
-    if x = y then
-      hasPrefix xs ys
-    else
-      false
-
-theorem commonPrefix_of_hasPrefix (xs ys : List α) (h : hasPrefix xs ys = true) :
-    commonPrefix xs ys = ys := by
-  induction xs, ys using commonPrefix.induct
-  case case1 => simp [commonPrefix]
-  case case2 => simp [hasPrefix] at h
-  case case3 x xs ys => simp_all [commonPrefix, hasPrefix]
-  case case4 x xs ys => simp_all [commonPrefix, hasPrefix]
 
 def mkPath (ps : List α) (t : Trie α β) : Trie α β :=
   if h : ps = [] then t else .path none ps h t
@@ -382,88 +456,20 @@ decreasing_by
   omega
 · simp_wf
 
-def uncompressPath (val : Option β) (ps : List α) (t : AssocList.Trie α β) : AssocList.Trie α β :=
-  match ps with
-  | [] => t
-  | p::ps => .node val (.cons p (uncompressPath none ps t) .nil)
 
 def uncompress : Trie α β → AssocList.Trie α β
   | .leaf val => .node val .nil
   | .node val cs => .node val (cs.mapSized fun t _ => t.uncompress)
-  | .path val ps _ t => uncompressPath val ps t.uncompress
-
-@[simp]
-theorem empty_spec : (empty : Trie α β).uncompress = .empty := by rfl
-
-@[simp]
-theorem uncompressPath_val (ps : List α) (val : Option β) (h : ps ≠ []) (t : AssocList.Trie α β):
-  (uncompressPath val ps t).val = val := by
-  unfold uncompressPath
-  split; contradiction; simp
-
-@[simp]
-theorem uncompressPath_c (p : α) (ps : List α) (val : Option β) (t : AssocList.Trie α β):
-  (uncompressPath val (p::ps) t).c = .cons p (uncompressPath none ps t) .nil := by
-  simp [uncompressPath]
-
-@[simp]
-theorem uncompressPath_eq_insert (ks : List α) (v : β) :
-   uncompressPath none ks (AssocList.Trie.node (some v) AssocList.nil) =
-    AssocList.Trie.empty.insert ks v := by
-  induction ks <;>
-    simp_all [uncompressPath, AssocList.upsert, AssocList.Trie.insert, AssocList.Trie.empty]
+  | .path val ps _ t => .path val ps t.uncompress
 
 @[simp]
 theorem uncompress_mkPath (ps : List α) (t : Trie α β) :
-    (mkPath ps t).uncompress = uncompressPath none ps t.uncompress := by
-  cases ps <;> simp [mkPath, uncompressPath, uncompress]
+    (mkPath ps t).uncompress = .path none ps t.uncompress := by
+  cases ps <;> simp [mkPath, AssocList.Trie.path, uncompress]
 
 
-theorem uncompressPath_insert_eq_commonPrefix (ps ks : List α) (t : AssocList.Trie α β) (v : β):
-    (uncompressPath none ps t).insert ks v =
-    uncompressPath none (commonPrefix ks ps)
-    ((uncompressPath none (List.drop (commonPrefix ks ps).length ps) t).insert
-      (List.drop (commonPrefix ks ps).length ks) v) := by
-  induction ks, ps using commonPrefix.induct
-  · simp [uncompressPath, commonPrefix, *]
-  · simp [uncompressPath, commonPrefix, *]
-  · simp [uncompressPath, commonPrefix, AssocList.Trie.insert, AssocList.upsert, *]
-  · simp [uncompressPath, commonPrefix, *]
-
-theorem uncompressPath_find_of_hasPrefix ps (t : AssocList.Trie α β) ks
-    (h : hasPrefix ks ps = true) :
-    (uncompressPath none ps t).find? ks = t.find? (List.drop ps.length ks) := by
-  induction ks generalizing ps
-  · match ps with
-    | [] => simp [uncompressPath, AssocList.Trie.find?]
-    | _::_ => simp [hasPrefix] at h
-  next k v ks ih =>
-    match ps with
-    | [] => simp [uncompressPath, AssocList.Trie.find?]
-    | _::_ =>
-      simp [hasPrefix] at h
-      have ⟨h1, h2⟩ := h; clear h
-      subst h1
-      simp_all [uncompressPath, AssocList.Trie.find?, AssocList.find?]
-
-theorem uncompressPath_find_of_not_hasPrefix ps (t : AssocList.Trie α β) ks
-    (h : hasPrefix ks ps = false) :
-    (uncompressPath none ps t).find? ks = none := by
-  induction ks generalizing ps
-  · match ps with
-    | [] => simp [hasPrefix] at h
-    | _::_ => simp [uncompressPath, AssocList.Trie.find?]
-  next k v ks ih =>
-    match ps with
-    | [] => simp [hasPrefix] at h
-    | _::_ =>
-      simp_all [uncompressPath, AssocList.Trie.find?, AssocList.find?]
-      split <;> try rfl
-      split at * <;> try contradiction
-      simp_all
-      subst_vars
-      simp [hasPrefix] at h
-      rw [ih _ h]
+@[simp]
+theorem empty_spec : (empty : Trie α β).uncompress = .empty := by rfl
 
 theorem insert_spec (t : Trie α β) (ks : List α) (v : β) :
     (insert t ks v).uncompress = t.uncompress.insert ks v := by
@@ -476,13 +482,13 @@ theorem insert_spec (t : Trie α β) (ks : List α) (v : β) :
     next =>
       simp [uncompress, AssocList.Trie.insert]
     next k ks =>
-      simp [uncompress, AssocList.Trie.insert, uncompressPath, AssocList.upsert,
-        uncompressPath_eq_insert]
+      simp [uncompress, AssocList.Trie.insert, AssocList.Trie.path, AssocList.upsert,
+        AssocList.Trie.path_eq_insert]
   next ps _ t'=>
     match ks with
     | [] =>
       cases ps; contradiction
-      simp [uncompress, uncompressPath, AssocList.Trie.insert]
+      simp [uncompress, AssocList.Trie.path, AssocList.Trie.insert]
     | (k::ks) =>
       have p::ps := ps
       simp only [↓reduceDite, ne_eq]
@@ -490,10 +496,10 @@ theorem insert_spec (t : Trie α β) (ks : List α) (v : β) :
       | [] =>
         simp only [↓reduceDite]
         simp [commonPrefix] at hpfx
-        simp [uncompress, uncompressPath, AssocList.Trie.insert, AssocList.mapSized,
+        simp [uncompress, AssocList.Trie.path, AssocList.Trie.insert, AssocList.mapSized,
           AssocList.upsert, hpfx]
       | p1::ps =>
-        simp [uncompress, AssocList.Trie.insert, uncompressPath]
+        simp [uncompress, AssocList.Trie.insert, AssocList.Trie.path]
         simp [commonPrefix] at hpfx
         split at hpfx <;> try contradiction
         simp at hpfx
@@ -501,7 +507,7 @@ theorem insert_spec (t : Trie α β) (ks : List α) (v : β) :
         subst p k ps
         rw [insert_spec]
         simp [AssocList.upsert, uncompress]
-        rw [← uncompressPath_insert_eq_commonPrefix]
+        rw [← AssocList.Trie.path_insert_eq_commonPrefix]
   next t val cs =>
     match ks with
     | [] => simp [uncompress, AssocList.Trie.insert]
@@ -526,17 +532,17 @@ theorem find?_spec (t : Trie α β) (ks : List α):
     cases hpfx with | _ heq hpfx =>
     subst p
     simp_all [uncompress, find?, AssocList.Trie.find?, AssocList.find?, hasPrefix,
-      uncompressPath_find_of_hasPrefix]
+      AssocList.Trie.path_find_of_hasPrefix]
   next ps _ _ _ _ hpfx =>
     have p::ps := ps
     simp_all [uncompress, find?, AssocList.Trie.find?, AssocList.find?, hasPrefix,
-      uncompressPath_find_of_hasPrefix]
+      AssocList.Trie.path_find_of_hasPrefix]
     split
     · simp
     next h =>
       split at h <;> simp at h
       subst h
-      rw [uncompressPath_find_of_not_hasPrefix]
+      rw [AssocList.Trie.path_find_of_not_hasPrefix]
       apply hpfx
       simp_all
 
@@ -1179,7 +1185,7 @@ termination_by t => sizeOf t
 theorem empty_spec : (empty : Trie α β).uncompress = .empty := by rfl
 
 @[simp]
-theorem uncompressPath_extract (val : Option β) (ks : Array α) (i j : Nat) t :
+theorem path_extract (val : Option β) (ks : Array α) (i j : Nat) t :
   uncompressPath val (Array.extract ks i (Array.size ks)) j t =
   uncompressPath val ks (i + j) t := by
   unfold uncompressPath;
@@ -1187,7 +1193,7 @@ theorem uncompressPath_extract (val : Option β) (ks : Array α) (i j : Nat) t :
   split
   next hj =>
     have : i + j < Array.size ks := by omega
-    simp [this, uncompressPath_extract (ks := ks) (j := j+1)]
+    simp [this, path_extract (ks := ks) (j := j+1)]
     rfl
   next hj =>
     have : ¬ (i + j < Array.size ks) := by omega
@@ -1203,7 +1209,7 @@ theorem uncompress_mkPath (ps : Array α) (t : Trie α β):
   next hps => simp [uncompress]
   next hps => unfold uncompressPath; simp [hps]
 
-theorem uncompressPath_node_eq_insert
+theorem path_node_eq_insert
   (val : Option β) (ks : Array α) (i : Nat) (v : β) :
   uncompressPath val ks i (Array.Trie.node (some v) #[] #[]) =
   Array.Trie.insert.go ks v (Array.Trie.node val #[] #[]) i := by sorry
@@ -1217,7 +1223,7 @@ theorem insert_go_spec (t : Trie α β) (ks : Array α) (i : Nat) (v : β):
     split
     next hi =>
       simp [uncompress]
-      exact uncompressPath_node_eq_insert ..
+      exact path_node_eq_insert ..
     next hi0 =>
       simp [insert.go, *, uncompress, Array.Trie.insert.go]
   | path val ps hps t' =>
