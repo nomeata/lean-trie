@@ -410,8 +410,8 @@ def insert (t : Trie α β) (ks : List α) (v : β) : Trie α β := match t with
     else
       let pfx := commonPrefix ks ps
       if hpfx : pfx = [] then
-        have c::ks' := ks
-        have c'::ps' := ps
+        let c::ks' := ks
+        let c'::ps' := ps
         let t := mkPath ks' (.leaf (some v))
         let t'' := mkPath ps' t'
         .node val (.cons c' t'' (.cons c t .nil)) -- order matters for refinement proof!
@@ -550,7 +550,7 @@ end Trie
 end Trie.CompressedList
 
 
-#exit
+section ArrayLib
 
 theorem Array.drop_data_cons {α : Type _} (as : Array α) (i : Nat) (h : i < as.size) :
   as.data.drop i = as[i] :: as.data.drop (i + 1) := by sorry
@@ -577,7 +577,6 @@ theorem Array.get_extract {α} {i : Nat} {as : Array α} {start stop : Nat} (h :
 
 def Array.attach {α} (as : Array α) : Array {x : α // x ∈ as} := by sorry
 
-
 @[simp]
 theorem Array.attach_singleton {α} (a : α) : #[a].attach = #[⟨a, .mk (by simp)⟩] := sorry
 
@@ -593,9 +592,355 @@ theorem Array.map_toArray {α β} (xs : List α) (f : α → β) :
 theorem Array.map_two {α β} (x₁ x₂ : α) (f : α → β) :
   #[x₁, x₂].map f = #[f x₁, f x₂] := sorry
 
+@[simp]
+theorem List.drop_drop :
+  ∀ (n m : Nat) (l : List α), List.drop n (List.drop m l) = List.drop (n + m) l :=
+  by sorry
+
 -- TODO: Lemma has wrong name in std
 axiom Array.getElem_mem :
   ∀ {α : Type u} {i : Nat} (a : Array α) (h : i < Array.size a), a[i] ∈ a
+
+theorem List.length_take_of_le :
+  ∀ {n : Nat} {l : List α}, n ≤ l.length → (List.take n l).length = n := by sorry
+
+theorem List.drop_cons {α : Type _} (as : List α) (i : Nat) (h : i < as.length) :
+  as.drop i = as[i] :: as.drop (i + 1) := by sorry
+
+theorem List.drop_nil_of_length {α : Type _} (as : List α) (i : Nat) (h : ¬ (i < as.length)) :
+  as.drop i = [] := by sorry
+
+end ArrayLib
+
+namespace AssocArray
+
+def upsert (ks : Array α) (vs : Array β) (k : α) (f : Option β → β) : Array α × Array β :=
+  go 0
+  where
+  go i :=
+    if hi : i < ks.size then
+      if hj : i < vs.size then
+        if k = ks[i] then
+          (ks, vs.modify i (fun v => f (some v)))
+        else
+          go (i + 1)
+      else
+        ((ks.extract 0 i).push k, vs.push (f none))
+    else
+      (ks.push k, (vs.extract 0 i).push (f none))
+  termination_by ks.size - i
+
+def toAssocList (kvs : Array α × Array β) : AssocList α β :=
+  go kvs.1.data kvs.2.data
+where
+  go | (k::ks), (v::vs) => .cons k v (go ks vs)
+     | _, _ => .nil
+
+@[simp]
+theorem toAssocList_go_map {γ} (ks : List α) (vs : List β) (f : β → γ) :
+   toAssocList.go ks (vs.map f) = AssocList.mapVal f (toAssocList.go ks vs) := by
+  induction ks generalizing vs
+  · cases vs <;> simp [toAssocList.go, AssocList.mapVal, *]
+  · cases vs <;> simp [toAssocList.go, AssocList.mapVal, *]
+
+@[simp]
+theorem toAssocList_map {γ} (ks : Array α) (vs : Array β) (f : β → γ) :
+    toAssocList (ks, vs.map f) = AssocList.mapVal f (toAssocList (ks, vs)) := by
+  simp [toAssocList, toAssocList_go_map]
+
+def upsert_go_spec (ks : Array α) (vs : Array β) (k : α) (f : Option β → β) (i : Nat) :
+    toAssocList (upsert.go ks vs k f i) =
+      (toAssocList.go (ks.data.drop i) (vs.data.drop i)).upsert k f := by
+  sorry
+
+def upsert_spec (ks : Array α) (vs : Array β) (k : α) (f : Option β → β) :
+    toAssocList (upsert ks vs k f) = (toAssocList.go ks.data vs.data).upsert k f := by
+  simp [upsert, upsert_go_spec]
+
+def find?' (ks : Array α) (vs : Array β) (k : α) : Option {x : β // x ∈ vs} := go 0
+  where
+  go i :=
+    if hi : i < ks.size then
+      if hj : i < vs.size then
+        if k = ks[i] then
+          some ⟨vs[i], Array.getElem_mem _ hj⟩
+        else
+          go (i + 1)
+      else
+        none
+    else
+      none
+  termination_by ks.size - i
+
+def find? (ks : Array α) (vs : Array β) (k : α) : Option β := (find?' ks vs k).map (·.val)
+
+def find?_spec (ks : Array α) (vs : Array β) (k : α) :
+    (find? ks vs k) = (toAssocList.go ks.data vs.data).find? k := by
+  sorry
+
+end AssocArray
+
+namespace Trie.Array
+
+/--
+Now additing path compression.
+-/
+inductive Trie (α : Type u) (β : Type v) where
+  | leaf (val : Option β)
+  | path (val : Option β) (ps : Array α) (hps : 0 < ps.size) (t : Trie α β) : Trie α β
+  | node (val : Option β) (ks : Array α) (vs : Array (Trie α β)) : Trie α β
+
+namespace Trie
+
+def empty : Trie α β := .leaf none
+
+def commonPrefix (xs : Array α) (ys : Array α) (offset1 : Nat) : Nat :=
+  let rec loop (i : Nat) : Nat :=
+    if h : offset1 + i < xs.size then
+      if h' : i < ys.size then
+        if xs[offset1 + i] = ys[i] then
+          loop (i + 1)
+        else
+          i
+      else
+        i
+    else
+      i
+    termination_by ys.size - i
+  loop 0
+
+def hasPrefix (xs : Array α) (ys : Array α) (offset1 : Nat) : Bool :=
+  let rec loop (i : Nat) : Bool :=
+    if h' : i < ys.size then
+      if h : offset1 + i < xs.size then
+        if xs[offset1 + i] = ys[i] then
+          loop (i + 1)
+        else
+          false
+      else
+        false
+    else
+      true
+    termination_by ys.size - i
+  loop 0
+
+
+theorem commonPrefix_spec (ks ps : Array α) (i : Nat) :
+  _root_.commonPrefix (ks.data.drop i) ps.data = ps.data.take (commonPrefix ks ps i) :=
+  sorry
+
+def mkPath (ps : Array α) (t : Trie α β) : Trie α β :=
+  if h : 0 < ps.size  then .path none ps h t else t
+
+def insert (t : Trie α β) (ks : Array α) (v : β) : Trie α β := go 0 t where
+  go (i : Nat)
+    | .leaf val =>
+      if h : i < ks.size then
+        path val (ks.extract i ks.size) (by simp [Array.size_extract]; omega) (.leaf (some v))
+      else
+        .leaf (some v)
+    | .path val ps hps t' =>
+      if h : i < ks.size then
+        let j := commonPrefix ks ps i
+        if hj : 0 < j then
+          -- split common prefix, continue
+          .path val (ps.extract 0 j) (by simp [Array.size_extract];omega) <| go (i + j) <|
+              .mkPath (ps.extract j ps.size) t'
+        else
+          -- no common prefix, split off first key
+          let c := ks[i]
+          let c' := ps[0]'(by omega)
+          let t := mkPath (ks.extract (i+1) ks.size) (.leaf (some v))
+          let t'' := mkPath (ps.extract 1 ps.size) t'
+          .node val #[c', c] #[t'', t] -- order matters for refinemnet proof!
+      else
+        .path (some v) ps hps t'
+    | .node val ks' vs =>
+      if h : i < ks.size then
+        let (ks'', vs'') := AssocArray.upsert ks' vs ks[i] fun t? =>
+          go (i + 1) (t?.getD empty)
+        .node val ks'' vs''
+      else
+        .node (some v) ks' vs
+  termination_by ks.size - i
+  decreasing_by all_goals simp_wf; omega
+
+def find? (t : Trie α β) (ks : Array α) : Option β := go 0 t where
+  go
+    | i, .leaf val =>
+      if i < ks.size then
+        none
+      else
+        val
+    | i, path val ps _ t' =>
+      if i < ks.size then
+        if hasPrefix ks ps i then
+          go (i + ps.size) t'
+        else
+          none
+      else
+        val
+    | i, .node val ks' vs =>
+      if h : i < ks.size then
+        match AssocArray.find? ks' vs ks[i] with
+        | none => none
+        | some t => go (i + 1) t
+      else
+        val
+  termination_by i => ks.size - i
+  decreasing_by all_goals simp_wf; omega
+
+def abstract : Trie α β → CompressedList.Trie α β
+  | .leaf val => .leaf val
+  | .path val ps hps t => .path val ps.data (by sorry) t.abstract
+  | .node val ks vs => .node val (AssocArray.toAssocList (ks, vs.attach.map fun ⟨t,_⟩ => t.abstract))
+
+@[simp]
+theorem empty_spec :
+    (empty : Trie α β).abstract = .empty := by
+  simp [abstract, empty, Trie.Abstract.Trie.empty]
+  rfl
+
+theorem mkPath_spec (ks : Array α) (t : Trie α β) :
+    (mkPath ks t).abstract = CompressedList.Trie.mkPath ks.data t.abstract := by
+  sorry
+
+theorem has_prefix_loop_spec (ks ps : Array α) (o : Nat) (i : Nat ):
+    hasPrefix.loop ks ps o i = _root_.hasPrefix (ks.data.drop (o + i)) (ps.data.drop i) := by
+  induction i using hasPrefix.loop.induct ks ps o
+  · rw [hasPrefix.loop]
+    rw [Array.drop_data_cons ks (o + _) ‹_›]
+    rw [Array.drop_data_cons ps _ ‹_›]
+    simp [*, _root_.hasPrefix, Nat.add_assoc]
+  · rw [hasPrefix.loop]
+    rw [Array.drop_data_cons ks (o + _) ‹_›]
+    rw [Array.drop_data_cons ps _ ‹_›]
+    simp [*, _root_.hasPrefix, Nat.add_assoc]
+  · rw [hasPrefix.loop]
+    rw [Array.drop_data_nil ks (o + _) ‹_›]
+    rw [Array.drop_data_cons ps _ ‹_›]
+    simp [*, _root_.hasPrefix, Nat.add_assoc]
+  · rw [hasPrefix.loop]
+    rw [Array.drop_data_nil ps _ ‹_›]
+    simp [*, _root_.hasPrefix, Nat.add_assoc]
+
+theorem has_prefix_spec (ks ps : Array α) (i : Nat) :
+    hasPrefix ks ps i = _root_.hasPrefix (ks.data.drop i) ps.data := by
+  apply has_prefix_loop_spec
+
+
+theorem find?_go_spec (t : Trie α β)  (ks : Array α) (i : Nat) :
+    find?.go ks i t = t.abstract.find? (ks.data.drop i) := by
+  induction i, t using find?.go.induct ks
+  next i val h =>
+    rw [Array.drop_data_cons ks i h]
+    simp_all [find?.go, abstract, CompressedList.Trie.find?]
+  next i val h =>
+    rw [Array.drop_data_nil ks i h]
+    simp_all only [find?.go, abstract, CompressedList.Trie.find?, if_false]
+  next i val ps hps t' h hpfx ih =>
+    rw [Array.drop_data_cons ks i h]
+    simp_all only [find?.go, abstract, CompressedList.Trie.find?, if_true]
+    rw [if_pos]
+    case hc => rw [has_prefix_spec, Array.drop_data_cons ks i h] at hpfx; exact hpfx
+    rw [← Array.drop_data_cons ks i h]
+    congr 1
+    simp [Array.size, Nat.add_comm]
+  next i val ps hps t' h hpfx =>
+    rw [Array.drop_data_cons ks i h]
+    simp_all only [find?.go, abstract, CompressedList.Trie.find?, if_true, if_false]
+    rw [if_neg]
+    case hnc => rw [has_prefix_spec, Array.drop_data_cons ks i h] at hpfx; exact hpfx
+  next i val ps hps t' h =>
+    rw [Array.drop_data_nil ks i h]
+    simp_all only [find?.go, abstract, CompressedList.Trie.find?, if_true, if_false]
+  next i val ks' s h x =>
+    rw [Array.drop_data_cons ks i h]
+    simp_all [find?.go, abstract, CompressedList.Trie.find?, dite_true, AssocArray.find?_spec,
+      Array.map_attach, AssocArray.toAssocList, AssocArray.toAssocList_go_map]
+  next i val ks' vs h t x ih =>
+    rw [Array.drop_data_cons ks i h]
+    simp_all [find?.go, abstract, CompressedList.Trie.find?, dite_true, AssocArray.find?_spec,
+      Array.map_attach, AssocArray.toAssocList, AssocArray.toAssocList_go_map]
+  next i val ks' vs h =>
+    rw [Array.drop_data_nil ks i h]
+    simp_all only [find?.go, abstract, CompressedList.Trie.find?]
+    apply dite_false -- why is the simplifier so confused here?
+
+theorem find?_spec (t : Trie α β)  (ks : Array α)  :
+    t.find? ks = t.abstract.find? ks.data := by
+  simp [find?, find?_go_spec]
+
+
+theorem commonPrefix_le_length (ks ps : Array α) (i : Nat) :
+    commonPrefix ks ps i ≤ ps.data.length := by
+  sorry
+
+theorem insert_go_spec (t : Trie α β) (ks : Array α) (v : β) (i : Nat) :
+    (insert.go ks v i t).abstract = t.abstract.insert (ks.data.drop i) v := by
+  induction i, t using insert.go.induct ks v
+  next i val h =>
+    simp_all [insert.go, abstract, CompressedList.Trie.insert, List.drop_cons]
+  next i val h =>
+    simp_all [insert.go, abstract, CompressedList.Trie.insert, List.drop_nil_of_length, -Nat.not_lt]
+  next i val ps hps t' hi j hj ih =>
+    simp_all [insert.go, abstract, CompressedList.Trie.insert, mkPath_spec]
+    rw [dif_neg]
+    case hnc => simp [List.drop_cons, *]
+    rw [dif_neg]
+    case hnc =>
+      rw [commonPrefix_spec]
+      unfold Array.size at hps
+      simp [j] at hj
+      revert hps hj
+      cases ps.data <;> cases commonPrefix ks ps i <;> intro _ _ <;> simp_all
+    simp [commonPrefix_spec, List.length_take_of_le (commonPrefix_le_length ..), j, Nat.add_comm]
+  next i val ps hps t' hi j hj =>
+    simp [insert.go, *, abstract, CompressedList.Trie.insert, mkPath_spec, AssocArray.toAssocList,
+      AssocArray.toAssocList.go]
+    rw [dif_neg]
+    case hnc => simp [Array.drop_data_cons, *]
+    rw [dif_pos]
+    case hc =>
+      rw [commonPrefix_spec]
+      unfold Array.size at hps
+      simp [j] at hj
+      revert hps hj
+      cases ps.data <;> cases commonPrefix ks ps i <;> intro _ _ <;> simp_all
+    split
+    split
+    rw [Array.drop_data_cons ks i ‹_›] at *
+    rename_i h _
+    simp_all [Array.getElem_eq_data_get, h]
+    have ⟨ps⟩ := ps
+    simp at h
+    subst h
+    rfl
+  next i val ps hps t' h =>
+    simp [insert.go, *, abstract, CompressedList.Trie.insert, mkPath_spec, AssocArray.toAssocList,
+      AssocArray.toAssocList.go]
+    rw [dif_pos]
+    case hc => simp [Array.drop_data_nil, *]
+  next i val ks' vs h ks'' vs'' x ih =>
+    rw [Array.drop_data_cons ks i h]
+    simp [insert.go, *, abstract, CompressedList.Trie.insert, mkPath_spec, AssocArray.toAssocList,
+      AssocArray.toAssocList.go]
+    rw [← AssocArray.toAssocList.eq_1 (ks'', vs''), ← x]; clear x
+    rw [AssocArray.upsert_spec]
+    apply AssocList.mapVal_upsert_congr
+    intro t?
+    rw [ih]
+    cases t? <;> simp
+  next i val ks' vs h =>
+    rw [Array.drop_data_nil ks i h]
+    simp [insert.go, *, abstract, CompressedList.Trie.insert, mkPath_spec, AssocArray.toAssocList,
+      AssocArray.toAssocList.go]
+
+theorem insert_spec (t : Trie α β) (ks : Array α) (v : β) :
+    (t.insert ks v).abstract = t.abstract.insert ks.data v := by
+  simp [insert, insert_go_spec]
+
+#exit
 
 namespace Trie.AbstractArray
 
