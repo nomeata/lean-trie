@@ -665,20 +665,18 @@ end ArrayLib
 
 namespace AssocArray
 
-def upsert (ks : Array α) (vs : Array β) (k : α) (f : Option β → β) : Array α × Array β :=
+def upsert (ks : Array α) (vs : Array β) (k : α) (f : Option β → β) :
+    Array α × Array β :=
   go 0
   where
   go i :=
     if hi : i < ks.size then
-      if hj : i < vs.size then
-        if k = ks[i] then
-          (ks, vs.modify i (fun v => f (some v)))
-        else
-          go (i + 1)
+      if k = ks[i] then
+        (ks, vs.modify i (fun v => f (some v)))
       else
-        ((ks.extract 0 i).push k, vs.push (f none))
+        go (i + 1)
     else
-      (ks.push k, (vs.extract 0 i).push (f none))
+      (ks.push k, vs.push (f none))
   termination_by ks.size - i
 
 def toAssocList (kvs : Array α × Array β) : AssocList α β :=
@@ -689,22 +687,26 @@ theorem toAssocList_map {γ} (ks : Array α) (vs : Array β) (f : β → γ) :
     toAssocList (ks, vs.map f) = AssocList.mapVal (toAssocList (ks, vs)) f := by
   simp [toAssocList, AssocList.mapVal, ← List.zip_map_right]
 
-def upsert_go_spec (ks : Array α) (vs : Array β) (k : α) (f : Option β → β) (i : Nat) :
+def upsert_go_spec (ks : Array α) (vs : Array β) (hsize : vs.size = ks.size)
+    (k : α) (f : Option β → β) (i : Nat) (his : i ≤ ks.size) :
     toAssocList (upsert.go ks vs k f i) =
       List.append (List.zip (ks.data.take i) (vs.data.take i))
         (AssocList.upsert (List.zip (ks.data.drop i) (vs.data.drop i)) k f) := by
   induction i using upsert.go.induct ks vs k f
-  · rw [upsert.go]
+  next i hi hk =>
+    rw [upsert.go]
     simp only [*, dite_true, if_true]
-    obtain ⟨ks1, x, ks2, rfl, vks1, hx⟩ := Array.list_view ks _ ‹_›
-    obtain ⟨vs1, y, vs2, rfl, hvs1, hy⟩ := Array.list_view vs _ ‹_›
+    obtain ⟨ks1, x, ks2, rfl, vks1, hx⟩ := Array.list_view ks i ‹_›
+    obtain ⟨vs1, y, vs2, rfl, hvs1, _hy⟩ := Array.list_view vs i (by omega)
     rw [Array.modify_data]
     case h => simp [*]; omega
     simp [AssocList.upsert, toAssocList, List.zip_append, *]
-  · rw [upsert.go]
+  next i hi hne ih =>
+    replace ih := ih (by omega)
+    rw [upsert.go]
     simp only [*, dite_true, if_false]
-    obtain ⟨ks1, x, ks2, rfl, vks1, hx⟩ := Array.list_view ks _ ‹_›
-    obtain ⟨vs1, y, vs2, rfl, hvs1, hy⟩ := Array.list_view vs _ ‹_›
+    obtain ⟨ks1, x, ks2, rfl, vks1, hx⟩ := Array.list_view ks i ‹_›
+    obtain ⟨vs1, y, vs2, rfl, hvs1, _hy⟩ := Array.list_view vs i (by omega)
     simp [hx] at *; clear hx
     conv =>
       left
@@ -715,17 +717,20 @@ def upsert_go_spec (ks : Array α) (vs : Array β) (k : α) (f : Option β → �
       right
       simp [AssocList.upsert, toAssocList, List.zip_append, *]
     simp
-  · rw [upsert.go]
+  next i hi =>
+    have : i = ks.size := by omega
+    rw [upsert.go]
     simp only [*, dite_false, dite_true]
-    obtain ⟨ks1, x, ks2, rfl, vks1, hx⟩ := Array.list_view ks _ ‹_›
-    simp [AssocList.upsert, toAssocList, *]
-    sorry
-  · sorry
+    simp [AssocList.upsert, toAssocList, *, List.zip_append]
+    rw [← hsize, List.take_length]
 
-def upsert_spec (ks : Array α) (vs : Array β) (k : α) (f : Option β → β) :
+def upsert_spec (ks : Array α) (vs : Array β) (k : α) (f : Option β → β)
+    (hsize : vs.size = ks.size) :
     toAssocList (upsert ks vs k f) = (toAssocList (ks, vs)).upsert k f := by
   rw [upsert, upsert_go_spec]
-  simp [toAssocList]
+  . simp [toAssocList]
+  · assumption
+  · exact Nat.zero_le ks.size
 
 def find?' (ks : Array α) (vs : Array β) (k : α) : Option {x : β // x ∈ vs} := go 0
   where
@@ -995,10 +1000,11 @@ theorem insert_go_spec (t : Trie α β) (ks : Array α) (v : β) (i : Nat) :
     conv => rhs; simp [AssocArray.toAssocList.eq_1]
     rw [← x]; clear x
     rw [AssocArray.upsert_spec]
-    apply AssocList.mapVal_upsert_congr
-    intro t?
-    rw [ih]
-    cases t? <;> simp
+    · apply AssocList.mapVal_upsert_congr
+      intro t?
+      rw [ih]
+      cases t? <;> simp
+    · sorry
   next i val ks' vs h =>
     rw [Array.drop_data_nil ks i h]
     simp [insert.go, *, abstract, CompressedList.Trie.insert, mkPath_spec]
