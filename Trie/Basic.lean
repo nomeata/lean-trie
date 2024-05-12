@@ -665,18 +665,26 @@ end ArrayLib
 
 namespace AssocArray
 
+-- The following operation would be more efficient
+-- if we knew `ks.size = vs.size`, but we cannot add this invariant
+-- to the `Trie` constructor, as it is not supported with Lean's
+-- encoding of nested recursion
+
 def upsert (ks : Array α) (vs : Array β) (k : α) (f : Option β → β) :
     Array α × Array β :=
   go 0
   where
   go i :=
     if hi : i < ks.size then
-      if k = ks[i] then
-        (ks, vs.modify i (fun v => f (some v)))
+      if hj : i < vs.size then
+        if k = ks[i] then
+          (ks, vs.modify i (fun v => f (some v)))
+        else
+          go (i + 1)
       else
-        go (i + 1)
+        ((ks.extract 0 i).push k, vs.push (f none))
     else
-      (ks.push k, vs.push (f none))
+      (ks.push k, (vs.extract 0 i).push (f none))
   termination_by ks.size - i
 
 def toAssocList (kvs : Array α × Array β) : AssocList α β :=
@@ -687,26 +695,26 @@ theorem toAssocList_map {γ} (ks : Array α) (vs : Array β) (f : β → γ) :
     toAssocList (ks, vs.map f) = AssocList.mapVal (toAssocList (ks, vs)) f := by
   simp [toAssocList, AssocList.mapVal, ← List.zip_map_right]
 
-def upsert_go_spec (ks : Array α) (vs : Array β) (hsize : vs.size = ks.size)
-    (k : α) (f : Option β → β) (i : Nat) (his : i ≤ ks.size) :
+def upsert_go_spec (ks : Array α) (vs : Array β)
+    (k : α) (f : Option β → β) (i : Nat) (hiks : i ≤ ks.size) (hivs : i ≤ vs.size) :
     toAssocList (upsert.go ks vs k f i) =
       List.append (List.zip (ks.data.take i) (vs.data.take i))
         (AssocList.upsert (List.zip (ks.data.drop i) (vs.data.drop i)) k f) := by
   induction i using upsert.go.induct ks vs k f
-  next i hi hk =>
+  next i hi hj hk =>
     rw [upsert.go]
     simp only [*, dite_true, if_true]
     obtain ⟨ks1, x, ks2, rfl, vks1, hx⟩ := Array.list_view ks i ‹_›
-    obtain ⟨vs1, y, vs2, rfl, hvs1, _hy⟩ := Array.list_view vs i (by omega)
+    obtain ⟨vs1, y, vs2, rfl, hvs1, _hy⟩ := Array.list_view vs i ‹_›
     rw [Array.modify_data]
     case h => simp [*]; omega
     simp [AssocList.upsert, toAssocList, List.zip_append, *]
-  next i hi hne ih =>
-    replace ih := ih (by omega)
+  next i hi hj hne ih =>
+    replace ih := ih (by omega) (by omega)
     rw [upsert.go]
     simp only [*, dite_true, if_false]
     obtain ⟨ks1, x, ks2, rfl, vks1, hx⟩ := Array.list_view ks i ‹_›
-    obtain ⟨vs1, y, vs2, rfl, hvs1, _hy⟩ := Array.list_view vs i (by omega)
+    obtain ⟨vs1, y, vs2, rfl, hvs1, _hy⟩ := Array.list_view vs i ‹_›
     simp [hx] at *; clear hx
     conv =>
       left
@@ -717,20 +725,33 @@ def upsert_go_spec (ks : Array α) (vs : Array β) (hsize : vs.size = ks.size)
       right
       simp [AssocList.upsert, toAssocList, List.zip_append, *]
     simp
-  next i hi =>
-    have : i = ks.size := by omega
+  next i hi hj =>
     rw [upsert.go]
     simp only [*, dite_false, dite_true]
-    simp [AssocList.upsert, toAssocList, *, List.zip_append]
-    rw [← hsize, List.take_length]
+    have : i = vs.size := by omega
+    simp [AssocList.upsert, toAssocList, *, List.zip_append,
+      List.drop_nil_of_length]
+    rw [List.zip_append]
+    rfl
+    rw [List.length_take_of_le]
+    simp_all [Array.size]
+  next i hi =>
+    rw [upsert.go]
+    simp only [*, dite_false, dite_true]
+    have : i = ks.size := by omega
+    simp [AssocList.upsert, toAssocList, *, List.zip_append,
+      List.drop_nil_of_length]
+    rw [List.zip_append]
+    rfl
+    rw [List.length_take_of_le]
+    simp_all [Array.size]
 
-def upsert_spec (ks : Array α) (vs : Array β) (k : α) (f : Option β → β)
-    (hsize : vs.size = ks.size) :
+def upsert_spec (ks : Array α) (vs : Array β) (k : α) (f : Option β → β) :
     toAssocList (upsert ks vs k f) = (toAssocList (ks, vs)).upsert k f := by
   rw [upsert, upsert_go_spec]
   . simp [toAssocList]
-  · assumption
-  · exact Nat.zero_le ks.size
+  · apply Nat.zero_le
+  · apply Nat.zero_le
 
 def find?' (ks : Array α) (vs : Array β) (k : α) : Option {x : β // x ∈ vs} := go 0
   where
@@ -1002,11 +1023,10 @@ theorem insert_go_spec (t : Trie α β) (ks : Array α) (v : β) (i : Nat) :
     conv => rhs; simp [AssocArray.toAssocList.eq_1]
     rw [← x]; clear x
     rw [AssocArray.upsert_spec]
-    · apply AssocList.mapVal_upsert_congr
-      intro t?
-      rw [ih]
-      cases t? <;> simp
-    · sorry
+    apply AssocList.mapVal_upsert_congr
+    intro t?
+    rw [ih]
+    cases t? <;> simp
   next i val ks' vs h =>
     rw [Array.drop_data_nil ks i h]
     simp [insert.go, *, abstract, CompressedList.Trie.insert, mkPath_spec]
