@@ -570,11 +570,23 @@ theorem Array.list_view  {α : Type _} (as : Array α) (i : Nat) (h : i < as.siz
     ∃ xs x ys, as = ⟨xs ++ x :: ys⟩ ∧ xs.length = i ∧ as[i] = x := by
   sorry
 
+@[simp]
+theorem List.take_left' :
+    ∀ {α} {l₁ l₂ : List α} {n : Nat}, l₁.length = n → List.take n (l₁ ++ l₂) = l₁ := by
+  sorry
+
+@[simp]
+theorem List.drop_left' :
+    ∀ {α} {l₁ l₂ : List α} {n : Nat}, l₁.length = n → List.drop n (l₁ ++ l₂) = l₂ := by
+  sorry
+
 theorem Array.drop_data_cons {α : Type _} (as : Array α) (i : Nat) (h : i < as.size) :
     as.data.drop i = as[i] :: as.data.drop (i + 1) := by
-  obtain ⟨xs, x, ys, rfl, hx, hxs⟩ := Array.list_view as i h
-  simp [*]
-  sorry
+  obtain ⟨xs, x, ys, rfl, hxs, hx⟩ := Array.list_view as i h
+  simp only [List.cons.injEq, true_and, hx ]
+  rw [List.drop_left', List.append_cons, List.drop_left']
+  · simp [*]
+  · simp [*]
 
 theorem Array.drop_data_nil {α : Type _} (as : Array α) (i : Nat) (h : ¬ i < as.size) :
   as.data.drop i = [] := by sorry
@@ -596,16 +608,6 @@ theorem Array.map_attach {α β} (xs : Array α) (f : α → β) :
 @[simp]
 theorem Array.map_toArray {α β} (xs : List α) (f : α → β) :
   xs.toArray.map f = (xs.map f).toArray := sorry
-
-@[simp]
-theorem List.take_left' :
-    ∀ {α} {l₁ l₂ : List α} {n : Nat}, l₁.length = n → List.take n (l₁ ++ l₂) = l₁ := by
-  sorry
-
-@[simp]
-theorem List.drop_left' :
-    ∀ {α} {l₁ l₂ : List α} {n : Nat}, l₁.length = n → List.drop n (l₁ ++ l₂) = l₂ := by
-  sorry
 
 @[simp]
 theorem List.drop_drop :
