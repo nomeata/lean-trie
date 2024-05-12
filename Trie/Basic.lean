@@ -566,8 +566,15 @@ end Trie.CompressedList
 
 section ArrayLib
 
+theorem Array.list_view  {α : Type _} (as : Array α) (i : Nat) (h : i < as.size) :
+    ∃ xs x ys, as = ⟨xs ++ x :: ys⟩ ∧ xs.length = i ∧ as[i] = x := by
+  sorry
+
 theorem Array.drop_data_cons {α : Type _} (as : Array α) (i : Nat) (h : i < as.size) :
-  as.data.drop i = as[i] :: as.data.drop (i + 1) := by sorry
+    as.data.drop i = as[i] :: as.data.drop (i + 1) := by
+  obtain ⟨xs, x, ys, rfl, hx, hxs⟩ := Array.list_view as i h
+  simp [*]
+  sorry
 
 theorem Array.drop_data_nil {α : Type _} (as : Array α) (i : Nat) (h : ¬ i < as.size) :
   as.data.drop i = [] := by sorry
@@ -575,9 +582,6 @@ theorem Array.drop_data_nil {α : Type _} (as : Array α) (i : Nat) (h : ¬ i < 
 @[simp]
 theorem Array.extract_data {α} (as : Array α) (i : Nat) (j : Nat) :
   (as.extract i j).data = (as.data.take j).drop i := by sorry
-
-theorem Array.modify_data {α} (as : Array α) (i : Nat) (f : α → α) (h : i < as.size):
-    (Array.modify as i f).data = as.data.take i ++ [f as[i]] ++ as.data.drop (i + 1) := by sorry
 
 theorem Array.data_getElem {α} (as : Array α) (i : Nat) (h : i < as.size) :
   as.data[i] = as[i] := rfl
@@ -607,9 +611,26 @@ theorem Array.map_two {α β} (x₁ x₂ : α) (f : α → β) :
   #[x₁, x₂].map f = #[f x₁, f x₂] := sorry
 
 @[simp]
+theorem List.take_left' :
+    ∀ {α} {l₁ l₂ : List α} {n : Nat}, l₁.length = n → List.take n (l₁ ++ l₂) = l₁ := by
+  sorry
+
+@[simp]
+theorem List.drop_left' :
+    ∀ {α} {l₁ l₂ : List α} {n : Nat}, l₁.length = n → List.drop n (l₁ ++ l₂) = l₂ := by
+  sorry
+
+@[simp]
 theorem List.drop_drop :
   ∀ (n m : Nat) (l : List α), List.drop n (List.drop m l) = List.drop (n + m) l :=
   by sorry
+
+theorem Array.data_modify {α} (as : Array α) (i : Nat) (f : α → α) (h : i < as.size):
+    (Array.modify as i f).data = as.data.take i ++ [f as[i]] ++ as.data.drop (i + 1) := by sorry
+
+theorem Array.modify_data
+  (xs : List α) (x : α) (ys : List α) (f : α → α) (i : Nat) (h : i < Array.size ⟨xs ++ x :: ys⟩) :
+  Array.modify ⟨xs ++ x :: ys⟩ i f = ⟨xs ++ f x :: ys⟩ := by sorry
 
 -- TODO: Lemma has wrong name in std
 axiom Array.getElem_mem :
@@ -634,6 +655,10 @@ theorem List.drop_zip (xs : List α) (ys : List β) (i : Nat)  :
   · cases i
     · simp
     · cases ys <;> simp_all
+
+theorem List.zip_append :
+    ∀ {α} {β} {l₁ r₁ : List α} {l₂ r₂ : List β}, l₁.length = l₂.length → (l₁ ++ r₁).zip (l₂ ++ r₂) = l₁.zip l₂ ++ r₁.zip r₂ :=
+  by sorry
 
 end ArrayLib
 
@@ -670,16 +695,32 @@ def upsert_go_spec (ks : Array α) (vs : Array β) (k : α) (f : Option β → �
         (AssocList.upsert (List.zip (ks.data.drop i) (vs.data.drop i)) k f) := by
   induction i using upsert.go.induct ks vs k f
   · rw [upsert.go]
-    rw [Array.drop_data_cons ks _ ‹_›]
-    rw [Array.drop_data_cons vs _ ‹_›]
+    simp only [*, dite_true, if_true]
+    obtain ⟨ks1, x, ks2, rfl, vks1, hx⟩ := Array.list_view ks _ ‹_›
+    obtain ⟨vs1, y, vs2, rfl, hvs1, hy⟩ := Array.list_view vs _ ‹_›
+    rw [Array.modify_data]
+    case h => simp [*]; omega
+    simp [AssocList.upsert, toAssocList, List.zip_append, *]
+  · rw [upsert.go]
+    simp only [*, dite_true, if_false]
+    obtain ⟨ks1, x, ks2, rfl, vks1, hx⟩ := Array.list_view ks _ ‹_›
+    obtain ⟨vs1, y, vs2, rfl, hvs1, hy⟩ := Array.list_view vs _ ‹_›
+    simp [hx] at *; clear hx
+    conv =>
+      left
+      rw [List.append_cons (bs := ks2), List.append_cons (bs := vs2)]
+      simp [AssocList.upsert, toAssocList, List.zip_append, *, - List.append_assoc,
+        - List.append_eq]
+    conv =>
+      right
+      simp [AssocList.upsert, toAssocList, List.zip_append, *]
+    simp
+  · rw [upsert.go]
+    simp only [*, dite_false, dite_true]
+    obtain ⟨ks1, x, ks2, rfl, vks1, hx⟩ := Array.list_view ks _ ‹_›
     simp [AssocList.upsert, toAssocList, *]
     sorry
-  · rw [upsert.go]
-    rw [Array.drop_data_cons ks _ ‹_›]
-    rw [Array.drop_data_cons vs _ ‹_›]
-    simp [AssocList.upsert, *]
-    sorry
-  all_goals sorry
+  · sorry
 
 def upsert_spec (ks : Array α) (vs : Array β) (k : α) (f : Option β → β) :
     toAssocList (upsert ks vs k f) = (toAssocList (ks, vs)).upsert k f := by
