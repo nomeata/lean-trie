@@ -583,20 +583,11 @@ theorem Array.drop_data_nil {α : Type _} (as : Array α) (i : Nat) (h : ¬ i < 
 theorem Array.extract_data {α} (as : Array α) (i : Nat) (j : Nat) :
   (as.extract i j).data = (as.data.take j).drop i := by sorry
 
-theorem Array.data_getElem {α} (as : Array α) (i : Nat) (h : i < as.size) :
-  as.data[i] = as[i] := rfl
-
 theorem Array.size_extract {α} (as : Array α) (start stop : Nat) :
     Array.size (Array.extract as start stop) = min stop (Array.size as) - start :=
   by sorry
 
-theorem Array.get_extract {α} {i : Nat} {as : Array α} {start stop : Nat} (h : i < Array.size (Array.extract as start stop)) :
- (Array.extract as start stop)[i] = as[start + i]'(by simp [Array.size_extract] at *; omega) := sorry
-
 def Array.attach {α} (as : Array α) : Array {x : α // x ∈ as} := by sorry
-
-@[simp]
-theorem Array.attach_singleton {α} (a : α) : #[a].attach = #[⟨a, .mk (by simp)⟩] := sorry
 
 @[simp]
 theorem Array.map_attach {α β} (xs : Array α) (f : α → β) :
@@ -605,10 +596,6 @@ theorem Array.map_attach {α β} (xs : Array α) (f : α → β) :
 @[simp]
 theorem Array.map_toArray {α β} (xs : List α) (f : α → β) :
   xs.toArray.map f = (xs.map f).toArray := sorry
-
-@[simp]
-theorem Array.map_two {α β} (x₁ x₂ : α) (f : α → β) :
-  #[x₁, x₂].map f = #[f x₁, f x₂] := sorry
 
 @[simp]
 theorem List.take_left' :
@@ -625,16 +612,9 @@ theorem List.drop_drop :
   ∀ (n m : Nat) (l : List α), List.drop n (List.drop m l) = List.drop (n + m) l :=
   by sorry
 
-theorem Array.data_modify {α} (as : Array α) (i : Nat) (f : α → α) (h : i < as.size):
-    (Array.modify as i f).data = as.data.take i ++ [f as[i]] ++ as.data.drop (i + 1) := by sorry
-
 theorem Array.modify_data
   (xs : List α) (x : α) (ys : List α) (f : α → α) (i : Nat) (h : i < Array.size ⟨xs ++ x :: ys⟩) :
   Array.modify ⟨xs ++ x :: ys⟩ i f = ⟨xs ++ f x :: ys⟩ := by sorry
-
--- TODO: Lemma has wrong name in std
-axiom Array.getElem_mem :
-  ∀ {α : Type u} {i : Nat} (a : Array α) (h : i < Array.size a), a[i] ∈ a
 
 theorem List.length_take_of_le :
   ∀ {n : Nat} {l : List α}, n ≤ l.length → (List.take n l).length = n := by sorry
@@ -647,14 +627,6 @@ theorem List.drop_nil_of_length {α : Type _} (as : List α) (i : Nat) (h : ¬ (
 
 theorem List.zip_map_right {γ} (f : β → γ) (l₁ : List α) (l₂ : List β) :
 l₁.zip (List.map f l₂) = List.map (Prod.map id f) (l₁.zip l₂) := sorry
-
-theorem List.drop_zip (xs : List α) (ys : List β) (i : Nat)  :
-    (xs.zip ys).drop i = (xs.drop i).zip (ys.drop i) := by
-  induction xs generalizing ys i
-  · cases ys <;> simp
-  · cases i
-    · simp
-    · cases ys <;> simp_all
 
 theorem List.zip_append :
     ∀ {α} {β} {l₁ r₁ : List α} {l₂ r₂ : List β}, l₁.length = l₂.length → (l₁ ++ r₁).zip (l₂ ++ r₂) = l₁.zip l₂ ++ r₁.zip r₂ :=
