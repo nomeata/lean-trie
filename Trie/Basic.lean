@@ -867,10 +867,9 @@ theorem commonPrefix_le_size (ks ps : Array α) (o : Nat) :
   apply commonPrefix_loop_le_size
   exact Nat.zero_le ps.size
 
-
 theorem commonPrefix_loop_spec (ks ps : Array α) (o : Nat) (i : Nat) :
-  _root_.commonPrefix (ks.data.drop (o + i)) (ps.data.drop i) =
-    (ps.data.drop i).take (commonPrefix.loop ks ps o i - i) := by
+  ps.data.take i ++ _root_.commonPrefix (ks.data.drop (o + i)) (ps.data.drop i) =
+    ps.data.take (commonPrefix.loop ks ps o i) := by
   induction i using commonPrefix.loop.induct ks ps o
   next i hiks hips heq ih =>
     unfold commonPrefix.loop
@@ -879,15 +878,12 @@ theorem commonPrefix_loop_spec (ks ps : Array α) (o : Nat) (i : Nat) :
     obtain ⟨ps1, p, ps2, rfl, hps1, hp⟩ := Array.list_view ps _ hips
     simp_all [_root_.commonPrefix]
     rw [List.append_cons (bs := ks2), List.append_cons (bs := ps2),
-      List.drop_left', List.drop_left'] at ih
-    rw [ih]; clear ih
-    -- rw [List.drop_left' (l₁ := ks1 ++ [k]), List.drop_left' (l₁ := ps1)]
-    simp [Nat.sub_add_eq]
-    cases h : commonPrefix.loop { data := ks1 ++ k :: ks2 } { data := ps1 ++ k :: ps2 } o (i + 1) - i
-    · sorry
-    · simp
+      List.take_left', List.drop_left', List.drop_left'] at ih
+    · simp only [List.append_assoc, List.singleton_append] at ih
+      apply ih
     · simp [*]
     · simp [*]; omega
+    · simp [*]
   next i hiks hips hneq =>
     unfold commonPrefix.loop
     simp [*]
@@ -896,15 +892,16 @@ theorem commonPrefix_loop_spec (ks ps : Array α) (o : Nat) (i : Nat) :
     simp_all [_root_.commonPrefix]
   next i hiks hips =>
     unfold commonPrefix.loop
+    simp [*]
     rw [Array.drop_data_nil ps _ ‹_›]
     simp_all [_root_.commonPrefix]
   next i hiks hips =>
     unfold commonPrefix.loop
     simp [*]
     rw [Array.drop_data_nil ks _ ‹_›]
-    simp_all [_root_.commonPrefix]
-    cases List.drop hiks ps.data; rfl; rfl
-
+    cases List.drop hiks ps.data
+    · simp [_root_.commonPrefix]
+    · simp [_root_.commonPrefix]
 
 theorem commonPrefix_spec (ks ps : Array α) (o : Nat) :
   _root_.commonPrefix (ks.data.drop o) ps.data = ps.data.take (commonPrefix ks ps o) := by
