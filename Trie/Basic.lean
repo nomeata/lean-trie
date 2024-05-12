@@ -851,10 +851,64 @@ def hasPrefix (xs : Array α) (ys : Array α) (offset1 : Nat) : Bool :=
     termination_by ys.size - i
   loop 0
 
+theorem commonPrefix_loop_le_size (ks ps : Array α) (o : Nat) (i : Nat)
+    (h : i ≤ ps.size) :
+    commonPrefix.loop ks ps o i ≤ ps.size := by
+  induction i using commonPrefix.loop.induct ks ps o
+  next ih =>
+    replace ih := ih (by omega)
+    unfold commonPrefix.loop; simp_all
+  · unfold commonPrefix.loop; simp [*]
+  · unfold commonPrefix.loop; simp [*]
+  · unfold commonPrefix.loop; simp [*]
 
-theorem commonPrefix_spec (ks ps : Array α) (i : Nat) :
-  _root_.commonPrefix (ks.data.drop i) ps.data = ps.data.take (commonPrefix ks ps i) :=
-  sorry
+theorem commonPrefix_le_size (ks ps : Array α) (o : Nat) :
+    commonPrefix ks ps o ≤ ps.size := by
+  apply commonPrefix_loop_le_size
+  exact Nat.zero_le ps.size
+
+
+theorem commonPrefix_loop_spec (ks ps : Array α) (o : Nat) (i : Nat) :
+  _root_.commonPrefix (ks.data.drop (o + i)) (ps.data.drop i) =
+    (ps.data.drop i).take (commonPrefix.loop ks ps o i - i) := by
+  induction i using commonPrefix.loop.induct ks ps o
+  next i hiks hips heq ih =>
+    unfold commonPrefix.loop
+    simp [*]
+    obtain ⟨ks1, k, ks2, rfl, hks1, hk⟩ := Array.list_view ks _ hiks
+    obtain ⟨ps1, p, ps2, rfl, hps1, hp⟩ := Array.list_view ps _ hips
+    simp_all [_root_.commonPrefix]
+    rw [List.append_cons (bs := ks2), List.append_cons (bs := ps2),
+      List.drop_left', List.drop_left'] at ih
+    rw [ih]; clear ih
+    -- rw [List.drop_left' (l₁ := ks1 ++ [k]), List.drop_left' (l₁ := ps1)]
+    simp [Nat.sub_add_eq]
+    cases h : commonPrefix.loop { data := ks1 ++ k :: ks2 } { data := ps1 ++ k :: ps2 } o (i + 1) - i
+    · sorry
+    · simp
+    · simp [*]
+    · simp [*]; omega
+  next i hiks hips hneq =>
+    unfold commonPrefix.loop
+    simp [*]
+    obtain ⟨ks1, k, ks2, rfl, hks1, hk⟩ := Array.list_view ks _ hiks
+    obtain ⟨ps1, p, ps2, rfl, hps1, hp⟩ := Array.list_view ps _ hips
+    simp_all [_root_.commonPrefix]
+  next i hiks hips =>
+    unfold commonPrefix.loop
+    rw [Array.drop_data_nil ps _ ‹_›]
+    simp_all [_root_.commonPrefix]
+  next i hiks hips =>
+    unfold commonPrefix.loop
+    simp [*]
+    rw [Array.drop_data_nil ks _ ‹_›]
+    simp_all [_root_.commonPrefix]
+    cases List.drop hiks ps.data; rfl; rfl
+
+
+theorem commonPrefix_spec (ks ps : Array α) (o : Nat) :
+  _root_.commonPrefix (ks.data.drop o) ps.data = ps.data.take (commonPrefix ks ps o) := by
+  simpa using commonPrefix_loop_spec ks ps o 0
 
 def mkPath (ps : Array α) (t : Trie α β) : Trie α β :=
   if h : 0 < ps.size  then .path none ps h t else t
@@ -1004,10 +1058,6 @@ theorem find?_spec (t : Trie α β)  (ks : Array α)  :
   simp [find?, find?_go_spec]
 
 
-theorem commonPrefix_le_length (ks ps : Array α) (i : Nat) :
-    commonPrefix ks ps i ≤ ps.data.length := by
-  sorry
-
 theorem insert_go_spec (t : Trie α β) (ks : Array α) (v : β) (i : Nat) :
     (insert.go ks v i t).abstract = t.abstract.insert (ks.data.drop i) v := by
   induction i, t using insert.go.induct ks v
@@ -1026,7 +1076,7 @@ theorem insert_go_spec (t : Trie α β) (ks : Array α) (v : β) (i : Nat) :
       simp [j] at hj
       revert hps hj
       cases ps.data <;> cases commonPrefix ks ps i <;> intro _ _ <;> simp_all
-    simp [commonPrefix_spec, List.length_take_of_le (commonPrefix_le_length ..), j, Nat.add_comm]
+    simp [commonPrefix_spec, List.length_take_of_le (commonPrefix_le_size ..), j, Nat.add_comm]
   next i val ps hps t' hi j hj =>
     simp [insert.go, *, abstract, CompressedList.Trie.insert, mkPath_spec]
     rw [dif_neg]
