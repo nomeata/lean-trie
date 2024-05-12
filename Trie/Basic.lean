@@ -878,7 +878,9 @@ theorem empty_spec :
 
 theorem mkPath_spec (ks : Array α) (t : Trie α β) :
     (mkPath ks t).abstract = CompressedList.Trie.mkPath ks.data t.abstract := by
-  sorry
+  have ⟨ks⟩ := ks
+  cases ks <;>
+    simp [mkPath, CompressedList.Trie.mkPath, abstract]
 
 theorem has_prefix_loop_spec (ks ps : Array α) (o : Nat) (i : Nat ):
     hasPrefix.loop ks ps o i = _root_.hasPrefix (ks.data.drop (o + i)) (ps.data.drop i) := by
