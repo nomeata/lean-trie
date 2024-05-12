@@ -753,13 +753,13 @@ def upsert_spec (ks : Array α) (vs : Array β) (k : α) (f : Option β → β) 
   · apply Nat.zero_le
   · apply Nat.zero_le
 
-def find?' (ks : Array α) (vs : Array β) (k : α) : Option {x : β // x ∈ vs} := go 0
+def find? (ks : Array α) (vs : Array β) (k : α) : Option β := go 0
   where
   go i :=
     if hi : i < ks.size then
       if hj : i < vs.size then
         if k = ks[i] then
-          some ⟨vs[i], Array.getElem_mem _ hj⟩
+          some vs[i]
         else
           go (i + 1)
       else
@@ -768,11 +768,42 @@ def find?' (ks : Array α) (vs : Array β) (k : α) : Option {x : β // x ∈ vs
       none
   termination_by ks.size - i
 
-def find? (ks : Array α) (vs : Array β) (k : α) : Option β := (find?' ks vs k).map (·.val)
+def find?_go_spec (ks : Array α) (vs : Array β) (k : α) (i : Nat) :
+    find?.go ks vs k i = AssocList.find? k (List.zip (ks.data.drop i) (vs.data.drop i)) := by
+  induction i using find?.go.induct ks vs k
+  next i hi hj hk =>
+    rw [find?.go]
+    simp only [*, dite_true, if_true]
+    obtain ⟨ks1, x, ks2, rfl, vks1, hx⟩ := Array.list_view ks i ‹_›
+    obtain ⟨vs1, y, vs2, rfl, hvs1, _hy⟩ := Array.list_view vs i ‹_›
+    simp [AssocList.find?, toAssocList, List.zip_append, *]
+  next i hi hj hne ih =>
+    -- replace ih := ih (by omega) (by omega)
+    rw [find?.go]
+    simp only [*, dite_true, if_false]
+    obtain ⟨ks1, x, ks2, rfl, vks1, hx⟩ := Array.list_view ks i ‹_›
+    obtain ⟨vs1, y, vs2, rfl, hvs1, _hy⟩ := Array.list_view vs i ‹_›
+    simp [hx] at *; clear hx
+    simp [AssocList.find?, toAssocList, List.zip_append, *]
+    conv =>
+      left
+      rw [List.append_cons (bs := ks2), List.append_cons (bs := vs2)]
+      simp [AssocList.find?, toAssocList, List.zip_append, *, - List.append_assoc,
+        - List.append_eq]
+  next i hi hj =>
+    rw [find?.go]
+    simp only [*, dite_false, dite_true]
+    simp [AssocList.find?, toAssocList, *, List.zip_append,
+      List.drop_nil_of_length]
+  next i hi =>
+    rw [find?.go]
+    simp only [*, dite_false, dite_true]
+    simp [AssocList.find?, toAssocList, *, List.zip_append,
+      List.drop_nil_of_length]
 
 def find?_spec (ks : Array α) (vs : Array β) (k : α) :
     (find? ks vs k) = (toAssocList (ks, vs)).find? k := by
-  sorry
+  apply find?_go_spec
 
 end AssocArray
 
