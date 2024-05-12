@@ -919,7 +919,10 @@ def find? (t : Trie α β) (ks : Array α) : Option β := go 0 t where
 
 def abstract : Trie α β → CompressedList.Trie α β
   | .leaf val => .leaf val
-  | .path val ps hps t => .path val ps.data (by sorry) t.abstract
+  | .path val ps hps t =>
+      have : ps.data ≠ [] := by
+        have ⟨ps⟩ := ps; simp [Array.size] at hps; cases ps; contradiction; simp
+      .path val ps.data this t.abstract
   | .node val ks vs => .node val (AssocArray.toAssocList (ks, vs.attach.map fun ⟨t,_⟩ => t.abstract))
 
 @[simp]
