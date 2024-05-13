@@ -477,6 +477,7 @@ theorem empty_spec : (empty : Trie α β).uncompress = .empty := by rfl
 theorem insert_spec (t : Trie α β) (ks : List α) (v : β) :
     (insert t ks v).uncompress = t.uncompress.insert ks v := by
   -- Bug in functional induction!
+  -- https://github.com/leanprover/lean4/issues/4146
   -- induction t, ks, v using insert.induct
   unfold insert
   split
